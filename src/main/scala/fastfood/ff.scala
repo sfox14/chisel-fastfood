@@ -14,8 +14,8 @@ Fastfood Implementation
 1. B = {-1,+1}
 2. G = {-1, +1} or N(0,1)
 */
-class FF( val n : Int, val d : Int, val k : Int, val SR : List[List[Int]],
-            val bitWidth : Int, val fracWidth : Int ) extends Module {
+class FF( val n : Int, val d : Int, val k : Int, val bitWidth : Int, val fracWidth : Int,
+             val SR : List[List[Int]] ) extends Module {
 
   /*
   n - number of support vectors
@@ -40,7 +40,9 @@ class FF( val n : Int, val d : Int, val k : Int, val SR : List[List[Int]],
   */
 
   // layer 1
-  val gphbx = Module( new GPHBx(d, k, SR(0), adderType.binAdd2, bitWidth, fracWidth) )
+  val gphbx = Module( new GPHBx(d, k, bitWidth, fracWidth, SR(0), BigInt(1), 
+                      adderType.binAdd2, count.log2Up, out.direct ) )
+
   gphbx.io.dIn.bits := io.dIn
   gphbx.io.dIn.valid := io.inValid
   io.dOut := gphbx.io.dOut.bits

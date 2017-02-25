@@ -14,7 +14,7 @@ lazy val rpSettings = Seq(
   resolvers += "typesafe" at "http://repo.typesafe.com/typesafe/releases/",
   parallelExecution in Test := false,
   // libraryDependencies ++= ( if (chiselVersion != "None" ) ("edu.berkeley.cs" %% "chisel" % chiselVersion) :: Nil; else Nil),
-  libraryDependencies += "com.github.tototoshi" %% "scala-csv" % "1.2.1",
+  libraryDependencies += "com.github.tototoshi" %% "scala-csv" % "1.3.4",
   libraryDependencies += "com.novocode" % "junit-interface" % "0.10" % "test",
   libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test",
   libraryDependencies += "org.scala-lang" % "scala-compiler" % "2.11.7"

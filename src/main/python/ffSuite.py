@@ -203,8 +203,7 @@ class ffSuite( object ):
     def scale_transformed_data(self, S, VX):
         """ Scale mapped data VX to match kernel(e.g. RBF-Kernel) """
         VX = VX.reshape(-1, self.k*self.d)
-        return (1 / (self.sigma * np.sqrt(self.d)) *
-                np.multiply(np.ravel(S), VX))
+        return (1 / (self.sigma * np.sqrt(self.d)) * np.multiply(np.ravel(S), VX))
 
     def phi(self, X):
         if self.tradeoff == 'accuracy':
@@ -257,6 +256,7 @@ class ffSuite( object ):
                                  .reshape((-1, 1)),
                                  chi.rvs(self.d, size=(self.k, self.d)))
         self.S = self.S*coeff
+        self.S_hw = (1 / (self.sigma * np.sqrt(self.d)) ) * self.S #taken from scale_transform
 
         self.U = self.rng.uniform(0, 2 * np.pi, size=self.n)
 
@@ -381,3 +381,18 @@ if __name__ == "__main__":
 
     testHardwareRepresentation()
 
+    """
+    rng = np.random.RandomState(seed=41)
+    f = ffSuite(n_features=70, n_dicts=400, random_state=rng, verbose=True)
+    f.fit( gType=1 )
+
+    X = np.random.randn(1, 70)
+
+    print X.shape, f.Vg.shape
+    GPHBX = np.dot(X, f.Vg.T[:,0]) #.reshape(f.k, -1 ,f.d)
+    print GPHBX.shape
+
+    print X
+    print f.Vg[0,:]
+    print GPHBX
+    """

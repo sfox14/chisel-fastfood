@@ -5,9 +5,9 @@ import Chisel._
 
 
 // static ram-based shift register with variable width and len (depth)
-class LUTSR32[ T <: Data ] ( genType : T, hex : String, t : Int, d : Int, forSim : Boolean = true ) extends Module {
+class LUTSR32[ T <: Data ] ( init : List[Int], t : Int, forSim : Boolean = true ) extends Module {
   
-  // d - the length of the hex string with valid data (* else - we lose zeros )
+  // bi - List of Ints (from LSB to MSB), i.e. x0 -> xd
   // t - number of parallel sreg's. # of data paths multiplied by number of bits required (for {-1,0,1} need 2 bits for each path)
 
   val io = new Bundle{
@@ -20,31 +20,29 @@ class LUTSR32[ T <: Data ] ( genType : T, hex : String, t : Int, d : Int, forSim
   32-bit hex strings, for each serial datapath.
   */
 
-  val bs = BigInt( hex, 16 ).toString(2) // hex string to binary string
-  val bi = ( bs map(_.asDigit) ).toList.reverse.padTo(d, 0).reverse // binary string to List of bin ints
-  val tli = (0 to t-1).map(x => bi.reverse.drop(x).grouped( t ).map(_.head).toList.grouped(32).map(y => y.reverse ).toList )// creates a Vector of t Lists 
+  //val bs = BigInt( hex, 16 ).toString(2) // hex string to binary string
+  //val bi = ( bs map(_.asDigit) ).toList.reverse.padTo(d, 0).reverse // binary string to List of bin ints
+  val tli = (0 to t-1).map(x => init.drop(x).grouped( t ).map(_.head).toList.grouped(32).map(y => y.reverse ).toList )// creates a Vector of t Lists 
   val tbs = tli.toList.map(x => x.map(y => y.map(z => z.toString).mkString) ) // converts the t Lists to t binary strings
   val ths = tbs.map(x => x.map(y => BigInt(y, 2).toString(16).toList.reverse.padTo(8,0).reverse.map(x=>x.toString).mkString ) )
   val tA = tli.toList(0).map(x => x.length) // the number of len for each SRLC32E, the first length of each layer in first channel
 
-  val num_layers = math.ceil( bi.length/(t*32).toDouble ).toInt
+  val num_layers = math.ceil( init.length/(t*32).toDouble ).toInt
   Predef.assert( num_layers == tA.length, "Error: Number of layers do not match hex string")
-
-  println(bi)
+  
+  /*
+  println(init)
   println(tli)
   println(tbs)
   println(ths)
   println(tA)
+  */
 
   /*
   Build the architecture:
   */
   val w = 5
   val arch = (0 to num_layers-1).map(x => (0 to t-1).map(y => Module( new SRLC32E( ths(y)(x), tA(x), forSim ) ) ) )
-  //if ( num_layers == 1) {
-  //val w = 4
-  //val arch = (0 to num_layers-1).map(x => (0 to t-1).map(y => Module( new SRL16E( ths(y)(x), tA(x) ) ) ) )
-  //}
   
   println(arch)
   
@@ -103,14 +101,14 @@ class LUTSR32[ T <: Data ] ( genType : T, hex : String, t : Int, d : Int, forSim
 
 
 
-class LUTSR( val hex : String, val t : Int, val d : Int, forSim : Boolean = true) extends Module {
+class LUTSR( val init : List[Int], val t : Int, forSim : Boolean = true) extends Module {
 	
 	val io = new Bundle{
 		val vld = Bool(INPUT)
 		val out = Vec.fill(t){ Bool(OUTPUT) }
 	}
 
-	val sreg = Module( new LUTSR32( Vec.fill(t){ Bool() }, hex, t, d, forSim )  )
+	val sreg = Module( new LUTSR32( init, t, forSim )  )
 
 	sreg.io.vld := io.vld
 	io.out := sreg.io.out
@@ -125,10 +123,13 @@ object LutSRVerilog {
   val t = 3
   val d = 32
 
+  // converts hex to list of ints (MSB to LSB)
+  val ram = ( ( BigInt( hex, 16 ).toString(2) ) map(_.asDigit) ).toList.reverse.padTo(d, 0).reverse
+
   def main(args: Array[String]): Unit = {
     println("Generating verilog LUT-based Shift Register (Synthesis with Xilinx Tools)")
     chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
-                () => Module( new LUTSR( hex, t, d, false ) ) ) 
+                () => Module( new LUTSR( ram, t, false ) ) ) 
 
   }
 }
@@ -136,11 +137,11 @@ object LutSRVerilog {
 
 class LutSRSim( c: LUTSR ) extends Tester(c) {
 
-	val init = c.hex
+	val init = c.init
 	val paths = c.t
 
 
-	val bin = ( BigInt( init, 16 ).toString(2) map(_.asDigit) ).toList.reverse
+	val bin = init
 	var k = 0
 
   println( bin, bin.length )
@@ -188,16 +189,21 @@ object LutSRTester{
 
 	//val hex = "ff00ff0000000fffffff000000000fffff00ff0000000fffffff000000000ffff" // the hex string (MSB to LSB)
 	//val hex = "f0f0f0f0"
-  val hex = "f0f0"
+  val hex = "0f0f005"
   val t = 3  // number of parallel data paths
-  val d = 16
+  val d = 26
+
+  // converts hex to list of ints (LSB to MSB)
+  val ram = ( ( BigInt( hex, 16 ).toString(2) ) map(_.asDigit) ).toList.reverse.padTo(d, 0)
+
+  println( ram )
 
 	def main(args: Array[String]): Unit = {
 	println("Testing the LUT-based shift register")
 
 	chiselMainTest(Array("--genHarness", "--test", "--backend", "c", //"--wio", 
 	  "--compile", "--targetDir", ".emulator"), // .emulator is a hidden directory
-	  () => Module(new LUTSR( hex, t, d, true ) ) ) {
+	  () => Module(new LUTSR( ram, t, true ) ) ) {
 	    f => new LutSRSim(f)
 	  }
 	}

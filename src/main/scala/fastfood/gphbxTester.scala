@@ -8,66 +8,49 @@ import utils._
 // generate verilog
 object gphbxVerilog {
 
-  val d = 50
-  val k = 3
+  val n_features = 50
+  val n_paths = 3
   val bitWidth = 18
   val fracWidth = 10
 
   // includes padding 
-  val SR = List(1,1,0,1,0,1,0, 0,0)
+  val ram = List(1,1,0,1,0,1,0, 0,0)
 
   def main(args: Array[String]): Unit = {
     println("Generating verilog for GPHBx module")
     chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
-                () => Module( new GPHBx( d, k, SR, adderType.binAdd3, bitWidth, fracWidth, false ) ) ) 
-
+                () => Module( new GPHBx( n_features, n_paths, bitWidth, fracWidth, 
+                                        ram, BigInt(1), adderType.binAdd3, count.log2Up, 
+                                        out.direct, false ) ) )
   }
 }
 
 
 // create a basic simulation
-class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
+class gbhbxSim( c: GPHBx, X : List[List[BigInt]], verbose : Boolean = true ) extends Tester(c) {
 
-  
-  def toFixed( myFloat : Float, message : String ) : BigInt = {
-    try{
-        ( myFloat * BigDecimal( BigInt(1) << c.fracWidth ) ).toBigInt
-      } catch{
-        case x:Exception => throw new Exception(message)
-      }
-  }
+  val rng = new Random( 23 )
 
-  def fromPeek(myNum : BigInt) : BigInt = {
-    if (myNum >= (BigInt(1) << (c.bitWidth - 1)))
-      myNum - (BigInt(1) << c.bitWidth)
-    else
-      myNum
-  }
+  val d = c.n_features
+  val k = c.n_paths
 
-
-  val myRand = new Random
-  val num = 10
-  val d = c.d
-  val k = c.k
-
-  val sr = c.SR.map(x => x*2 -1 )
+  val ram = c.ram
 
   printf("Dimension of input vector:  %d\n", d)
   printf("Number of data paths:       %d\n", k)
+  printf("Length of LUT RAM:          %d\n", ram.length)
+
 
   // create some test data
-  val chunks = math.ceil(d/k.toFloat).toInt
-  val pd = chunks*k
+  val ( dIn, dOut ) = preprocess.binary_gphbx(X, d, k, ram )
+  //val ( dIn, dOut ) = preprocess.ternary_gphbx(X, d, k, ram )  
+  //val ( dIn, dOut ) = preprocess.normal_gphbx(X, d, k, ram, c.G, c.fracWidth)
 
-  val dIn = (0 until num).map(x => (0 until d).map(x => toFixed( myRand.nextFloat, "error" ) ).padTo(chunks*k, BigInt(0)).toList.grouped( k ).toList).toList
-  val dInTemp = dIn.map(x => x.flatten )
-  val dOutTemp = dInTemp.map( x => (sr, x).zipped.map(_*_) ).map(x => x.grouped(k).toList)
-  val dOut = dOutTemp.map(x => x.map(y => y.reduce(_+_)).reduce(_+_) ).toList
-  
-  // timing parameters
-  val iCycles = c.iCycles
-  val aCycles = c.aCycles
-  val nCycles = c.nCycles
+  //number of batches an input vector is divided into 
+  val n_batches = dIn(0).length
+
+  // number of examples
+  val num = dIn.length
 
   // keep track of dOut
   var numI = 0
@@ -77,20 +60,20 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
 
   for ( ix <- 0 until num ){
 
-    for (iy <- 0 until chunks){
+    for (iy <- 0 until n_batches){
 
       /*
       Introduce some random inValid patterns
       */
-      var en = (myRand.nextInt(5) >= 2)
+      var en = (rng.nextInt(5) >= 2)
       poke( c.io.dIn.valid, en )
       while ( !en ){
         // poke invalid random nums
-        for( iz <- 0 until k){ poke( c.io.dIn.bits(iz), toFixed( myRand.nextFloat, "error" ) ) }
+        for( iz <- 0 until k){ poke( c.io.dIn.bits(iz), toFixed( rng.nextDouble, c.fracWidth ) ) }
 
         if (verbose){
-          peek( c.sreg.io.vld )
-          peek( c.sreg.io.out )
+          //peek( c.sreg.io.vld )
+          //peek( c.sreg.io.out )
           peek( c.adderValid )
           peek( c.counter )
           peek( c.accReg )
@@ -100,10 +83,11 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
 
         if ( (peek(c.io.dOut.valid) == 1) && numI < num ){
           expect( c.io.dOut.bits, dOut(numI) )
+          println( fromPeek.toDbl( peek(c.io.dOut.bits), c.bitWidth, c.fracWidth ) )
           numI += 1
         }
 
-        en = (myRand.nextInt(5) >= 2)
+        en = (rng.nextInt(5) >= 2)
         poke( c.io.dIn.valid, en)
 
       }
@@ -114,8 +98,8 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
       for( iz <- 0 until k){ poke( c.io.dIn.bits(iz), dIn(ix)(iy)(iz) ) }
 
       if (verbose){
-          peek( c.sreg.io.vld )
-          peek( c.sreg.io.out )
+          //peek( c.sreg.io.vld )
+          //peek( c.sreg.io.out )
           peek( c.adderValid )
           peek( c.counter )
           peek( c.accReg )
@@ -125,6 +109,7 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
  
       if ( (peek(c.io.dOut.valid) == 1) && numI < num ){
         expect( c.io.dOut.bits, dOut(numI) )
+        println( fromPeek.toDbl( peek(c.io.dOut.bits), c.bitWidth, c.fracWidth ) )
         numI += 1
       }
 
@@ -132,7 +117,7 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
   }
 
   // evaluate remaining examples 
-  for (ix <- 0 until aCycles){
+  for (ix <- 0 until c.aCycles+2){ //+2 -> for outFunc = mul
     
     if (verbose){
       peek( c.adderValid )
@@ -144,6 +129,7 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
     
     if ( (peek(c.io.dOut.valid) == 1) && numI < num ){
         expect( c.io.dOut.bits, dOut(numI) )
+        println( fromPeek.toDbl( peek(c.io.dOut.bits), c.bitWidth, c.fracWidth ) )
         numI += 1
       }
     
@@ -160,21 +146,44 @@ class gbhbxSim( c: GPHBx, verbose : Boolean = true ) extends Tester(c) {
 
 object gbhbxTester {
 
-  val d = 7
-  val k = 3
+  val n_dicts = 400
+  val n_features = 70
+  val n_paths = 3
   val bitWidth = 18
   val fracWidth = 10
 
-  // includes padding 
-  val SR = List(1,1,0,1,0,1,0, 0,0) //LSB to MSB
+  // number of batches required for an input vector
+  val n_batches = math.ceil(n_features/n_paths.toFloat).toInt
+  var padding = n_batches*n_paths
+
+  // type of gaussian matrix
+  val gType = "binary"
+  if ( gType == "ternary" ){
+    padding = padding*2
+  }
+
+  // create a fastfood python-dependent test object 
+  val test = new FastFoodTest( n_dicts, n_features, gType )
+  test.make
+
+  // retrieve architecture specific parameters, LSB to MSB
+  val ram = test.GPHB( false )(0).padTo( padding, 0 )
+  println( ram, ram.length )
+  val G = test.G( fracWidth )(0)
+
+  // retrieve the X data for the dataset prescribed in py.make
+  val X = test.X( fracWidth )
+  //val X = random_data(10, n_features, fracWidth )
+
 
   def main(args: Array[String]): Unit = {
     println("Testing the GPHBx module")
     
     chiselMainTest(Array("--genHarness", "--test", "--backend", "c", //"--wio", 
       "--compile", "--targetDir", ".emulator"), // .emulator is a hidden directory
-      () => Module(new GPHBx( d, k, SR, adderType.binAdd3, bitWidth, fracWidth ) ) ) {
-        f => new gbhbxSim(f, true)
+      () => Module(new GPHBx( n_features, n_paths, bitWidth, fracWidth, ram, G(0),
+                               adderType.triAdd3, count.log3Up, out.direct ) ) ) {
+        f => new gbhbxSim(f, X, true)
       }
   }
 

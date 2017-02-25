@@ -1,5 +1,5 @@
 SBT ?= sbt
-SBT_FLAGS ?= -Dsbt.log.noformat=true
+SBT_FLAGS ?= -Dsbt.log.noformat=true -language:postfixOps
 CHISEL_FLAGS := --wio
 staging_dir := ~/.sbt/0.13/staging
 
@@ -22,7 +22,7 @@ cleanall: clean
 
 # Run tests and generate verilog:
 
-run: $(top_file)
+run: #$(top_file)
 	set -e pipefail; $(SBT) $(SBT_FLAGS) "run --genHarness --backend v $(CHISEL_FLAGS)"
 
 

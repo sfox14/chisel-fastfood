@@ -4,15 +4,19 @@ import Chisel._
 import utils._
 import xilinx._
 
+
 /*
-GPHBx layer - Serial Processor ( t features per cycle )
+GPHBx layer - Serial Processor ( k features per cycle )
+            - Code for one dot product. there are n of these modules in fastfood
 */
-class GPHBx( val d : Int, val k : Int, val SR : List[Int], adderFunc : Vector[Fixed] => Fixed, 
-					val bitWidth : Int, val fracWidth : Int, forSim : Boolean = true ) extends Module {
+class GPHBx( val n_features : Int, val n_paths : Int, val bitWidth : Int, val fracWidth : Int,
+  val ram : List[Int], val G : BigInt, adderFunc : Vector[Fixed] => Fixed, 
+  cycleFunc : Int => Int, outFunc : (Fixed, Fixed, Bool) => (Fixed, Bool), 
+  forSim : Boolean = true ) extends Module {
 
   val io = new Bundle{
 
-    val dIn = Decoupled( Vec.fill(k){ Fixed( INPUT, bitWidth, fracWidth ) } ).flip
+    val dIn = Decoupled( Vec.fill( n_paths ){ Fixed( INPUT, bitWidth, fracWidth ) } ).flip
     val dOut = Decoupled( Fixed( OUTPUT, bitWidth, fracWidth ) ) 
 
   }
@@ -22,23 +26,29 @@ class GPHBx( val d : Int, val k : Int, val SR : List[Int], adderFunc : Vector[Fi
   	aCycles - number of stages in the adder tree (triAdders would be different)
   	nCycles - latency of module. ( = add + 1 cycle for acc + remaining dIn vecs )
   */
-  val iCycles = math.ceil(d/k.toFloat).toInt 
-  val aCycles = log2Up( k ) // for binAdder
+  val iCycles = math.ceil(n_features/n_paths.toFloat).toInt 
+  val aCycles = cycleFunc( n_paths ) // for adder tree
   val nCycles = (aCycles + 1) + (iCycles - 1) 
 
   println(iCycles)
   println(aCycles)
   println(nCycles)
 
-  // get the hex number. given as list from LSB to MSB, therefore reverse and convert, must be 32-bit hex string 
-  val hex = BigInt( SR.reverse.map(x=>x.toString).mkString, 2 ).toString(16).toList.reverse.padTo(8,0).reverse.map(x=>x.toString).mkString 
-  println( hex )
+  /*
+  Select the G matrix:
+    1.  binary    -   Hadamard or G = {-1,1}
+    2.  ternary   -   G = {-1,0,1} 
 
-  // Multiply GPHB, i.e. {-1, 0, 1}
-  val num_sel = k //if ternary then num_sel = 2*k
-  val sreg = Module( new LUTSR32( Vec.fill( k ){ Bool() }, hex, num_sel, d, forSim ) )
-  sreg.io.vld := io.dIn.valid
-  val vdIn = (0 until k).map(x => Mux( sreg.io.out(x), io.dIn.bits(x), -io.dIn.bits(x) ) ).toVector
+  Instantiates the LUT-based Shift Register using SRLC32E primitive. Connects the
+  dIn.valid to the clock enable. The output is used as select lines for the
+  {-1,0,+1} Muxes.
+
+  We never need to use ternary for fastfood because GPHB simplifies to binary
+  except some rows are fully zero, which in effect means that we need to compute 
+  less dot products and the total number of GPHBx modules is reduced        
+  */
+  val vdIn = stream.binary( io.dIn, n_paths, ram, forSim)
+  //val vdIn = stream.ternary( io.dIn, n_paths, ram, forSim)
 
 
 
@@ -95,8 +105,10 @@ class GPHBx( val d : Int, val k : Int, val SR : List[Int], adderFunc : Vector[Fi
   	}
   }
 
-  io.dOut.bits := accReg
-  io.dOut.valid := outValid
+  // apply the out layer (either a mul or direct connect)
+  val (res, vld) = outFunc( accReg, Fixed( G, bitWidth, fracWidth), outValid )
+  io.dOut.bits := res   //accReg
+  io.dOut.valid := vld //outValid
 
 }
 
