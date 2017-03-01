@@ -379,9 +379,10 @@ def testHardwareRepresentation():
 
 if __name__ == "__main__":
 
-    testHardwareRepresentation()
+    #testHardwareRepresentation()
 
-    """
+    
+    '''
     rng = np.random.RandomState(seed=41)
     f = ffSuite(n_features=70, n_dicts=400, random_state=rng, verbose=True)
     f.fit( gType=1 )
@@ -395,4 +396,12 @@ if __name__ == "__main__":
     print X
     print f.Vg[0,:]
     print GPHBX
-    """
+    '''
+
+    rng = np.random.RandomState(seed=41)
+    f = ffSuite(n_features=8, n_dicts=8, random_state=rng, verbose=True)
+    f.fit( gType=1 )
+
+    print f.H
+    x = np.array([[1.67,0,0,1.87,-2.3,-1,0,0.86]])
+    print np.dot(x, f.H)

@@ -236,3 +236,5 @@ class FastFoodTest( var n_dicts : Int, var n_features : Int,
   }
 
 }
+
+// Maybe I should decouple the import matrices and conversion to LUT RAM format

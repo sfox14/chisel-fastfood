@@ -77,7 +77,6 @@ object reduceHadamard
 
 }
 
-
 /*
 Hadamard layer  - Parallel Processor
                 - hadamard transform for a (n_features x n_features) matrix
