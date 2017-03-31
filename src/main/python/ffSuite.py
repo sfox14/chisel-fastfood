@@ -17,6 +17,15 @@ except ImportError:
         X, = check_arrays(*args, **kwargs)
         return X
 
+"""
+Python code for Fastfood algorithm
+    - computes using a serial/software representation of the datapath
+    - also shows the computation for a parallel/hardware representation
+    - these are equivalent
+
+    - this code is called by "make_params.py", which is called from several of the
+      scala/chisel testers.
+"""
 
 
 def dim_constraints(d=4, n=8):
@@ -214,7 +223,14 @@ class ffSuite( object ):
             out /= np.sqrt( X.shape[1] )
             return out
         else:
-            np.cos(X+self.U, X)
+            """
+            We want to train our network such that X is a decimal number. This will
+            make it possible to address a LUT in FPGA to evaluate the cosine function.
+
+            X - decimal (instead of radians)
+            U - hardware version of U will also change (2*pi coefficient)
+            """
+            np.cos(2*np.pi*(X + self.U), X) # np.cos(X + self.U, X)
             return X * np.sqrt(2. / X.shape[1])
 
 
@@ -259,6 +275,8 @@ class ffSuite( object ):
         self.S_hw = (1 / (self.sigma * np.sqrt(self.d)) ) * self.S #taken from scale_transform
 
         self.U = self.rng.uniform(0, 2 * np.pi, size=self.n)
+        self.U_hw = 2*np.pi*self.U
+        self.A_hw = np.sqrt( 2./self.n ) #amplitude of cosine LUT
 
         # --- Hardware RAM-based Shift Registers ----
         '''
@@ -376,7 +394,6 @@ def testHardwareRepresentation():
 
 
 
-
 if __name__ == "__main__":
 
     #testHardwareRepresentation()
@@ -398,6 +415,7 @@ if __name__ == "__main__":
     print GPHBX
     '''
 
+    """
     rng = np.random.RandomState(seed=41)
     f = ffSuite(n_features=8, n_dicts=8, random_state=rng, verbose=True)
     f.fit( gType=1 )
@@ -405,3 +423,63 @@ if __name__ == "__main__":
     print f.H
     x = np.array([[1.67,0,0,1.87,-2.3,-1,0,0.86]])
     print np.dot(x, f.H)
+    """
+
+    nd = 16
+    nf = 8
+
+    rng = np.random.RandomState(seed=41)
+    f = ffSuite(sigma=11.47, n_features=nf, n_dicts=nd, random_state=rng)
+    f.fit( gType=1 )
+
+    alpha = rng.normal(size=( 1, f.n ))
+
+    X_all = np.random.randn(10, nf)
+    Y = np.random.randn(10, 1)
+
+    #"""
+    data = np.loadtxt("../../../../exanicFastfood/artificialNovMod.csv", delimiter=",", 
+        usecols = range(3, 11) )
+    print data.shape
+    print data[0]
+    
+    X_all = data
+    #"""
+
+    #print X_all
+
+    for i,X in enumerate(X_all): 
+
+        GPHBX = np.dot(X, f.Vg.T).reshape(f.k, -1 ,f.d)
+
+        #print GPHBX
+
+        HGPHBX = np.vstack( [ np.dot(GPHBX[j], f.H) ] for j in range(f.k) )
+
+        HGPHBX = np.ravel(HGPHBX).reshape(1, nd)
+
+        #print "hgphbx: ", HGPHBX
+
+        #print np.ravel( f.S_hw )
+
+        sc = HGPHBX*np.ravel( f.S_hw )
+
+        #print "\nscale: ", sc
+
+        #phi = f.A_hw*np.cos( ( 2*np.pi*sc )+ f.U_hw )
+        phi = f.A_hw * np.cos( ( np.pi*sc ) + f.U_hw )  # this should be the same as LUT.scala
+        
+
+        #print "\nU and A: ", f.U_hw, f.A_hw
+
+        #print "\nphi scale: ", phi
+
+        #print phi.shape, alpha.shape
+
+        ypred = np.dot( phi, alpha.T )
+        y = 0 #Y[i]
+        err = y - ypred
+        print ypred, y, err, alpha.shape, phi.shape
+        #print ypred
+
+        #alpha = alpha + 1*err[0][0]*phi
