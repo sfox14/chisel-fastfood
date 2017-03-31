@@ -5,7 +5,7 @@ import Chisel._
 
 
 // static ram-based shift register with variable width and len (depth)
-class LUTSR32[ T <: Data ] ( init : List[Int], t : Int, forSim : Boolean = true ) extends Module {
+class LUTSR32[ T <: Data ] ( init : List[Int], t : Int ) extends Module {
   
   // bi - List of Ints (from LSB to MSB), i.e. x0 -> xd
   // t - number of parallel sreg's. # of data paths multiplied by number of bits required (for {-1,0,1} need 2 bits for each path)
@@ -22,35 +22,33 @@ class LUTSR32[ T <: Data ] ( init : List[Int], t : Int, forSim : Boolean = true 
 
   //val bs = BigInt( hex, 16 ).toString(2) // hex string to binary string
   //val bi = ( bs map(_.asDigit) ).toList.reverse.padTo(d, 0).reverse // binary string to List of bin ints
-  val tli = (0 to t-1).map(x => init.drop(x).grouped( t ).map(_.head).toList.grouped(32).map(y => y.reverse ).toList )// creates a Vector of t Lists 
+  val tli = (0 to t-1).map(x => init.drop(x).grouped( t )
+              .map(_.head).toList.grouped(32)
+              .map(y => y.reverse ).toList )// creates a Vector of t Lists 
   val tbs = tli.toList.map(x => x.map(y => y.map(z => z.toString).mkString) ) // converts the t Lists to t binary strings
-  val ths = tbs.map(x => x.map(y => BigInt(y, 2).toString(16).toList.reverse.padTo(8,0).reverse.map(x=>x.toString).mkString ) )
+  val ths = tbs.map(x => x.map(y => BigInt(y, 2)
+            .toString(16).toList
+            .reverse.padTo(8,0)
+            .reverse.map(x=>x.toString).mkString ) )
   val tA = tli.toList(0).map(x => x.length) // the number of len for each SRLC32E, the first length of each layer in first channel
 
   val num_layers = math.ceil( init.length/(t*32).toDouble ).toInt
   Predef.assert( num_layers == tA.length, "Error: Number of layers do not match hex string")
   
   /*
-  println(init)
-  println(tli)
-  println(tbs)
-  println(ths)
-  println(tA)
-  */
-
-  /*
   Build the architecture:
   */
+
+  /* *****NOTE*****
+  The Chisel wrapper for SRLC32E creates verilog which is un-clocked. (Still to fix). As a consequence, we
+  instantiate SRLC32E_sim module which xst translates to distributed RAM.
+  */
   val w = 5
-  val arch = (0 to num_layers-1).map(x => (0 to t-1).map(y => Module( new SRLC32E( ths(y)(x), tA(x), forSim ) ) ) )
-  
-  println(arch)
+  val arch = (0 to num_layers-1).map(x => (0 to t-1).map(y => Module( new SRLC32E_sim( ths(y)(x), tA(x) ) ) ) )
   
   /*
   Make default connections:
   */
-  println( s"Number of layers: $num_layers" )
-  println( s"Number of paths: $t" )
   if (num_layers == 1){
   	// easiest option - arch.last == arch(0)
   	val mod = arch(0)
@@ -100,15 +98,15 @@ class LUTSR32[ T <: Data ] ( init : List[Int], t : Int, forSim : Boolean = true 
 }
 
 
-
-class LUTSR( val init : List[Int], val t : Int, forSim : Boolean = true) extends Module {
+// wrapper for LUTSR32 for testing
+class LUTSR( val init : List[Int], val t : Int ) extends Module {
 	
 	val io = new Bundle{
 		val vld = Bool(INPUT)
 		val out = Vec.fill(t){ Bool(OUTPUT) }
 	}
 
-	val sreg = Module( new LUTSR32( init, t, forSim )  )
+	val sreg = Module( new LUTSR32( init, t )  )
 
 	sreg.io.vld := io.vld
 	io.out := sreg.io.out
@@ -129,7 +127,7 @@ object LutSRVerilog {
   def main(args: Array[String]): Unit = {
     println("Generating verilog LUT-based Shift Register (Synthesis with Xilinx Tools)")
     chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
-                () => Module( new LUTSR( ram, t, false ) ) ) 
+                () => Module( new LUTSR( ram, t ) ) ) 
 
   }
 }
@@ -201,9 +199,9 @@ object LutSRTester{
 	def main(args: Array[String]): Unit = {
 	println("Testing the LUT-based shift register")
 
-	chiselMainTest(Array("--genHarness", "--test", "--backend", "c", //"--wio", 
-	  "--compile", "--targetDir", ".emulator"), // .emulator is a hidden directory
-	  () => Module(new LUTSR( ram, t, true ) ) ) {
+	chiselMainTest(Array("--genHarness", "--test", "--backend", "c", 
+	  "--compile", "--targetDir", ".emulator"),
+	  () => Module(new LUTSR( ram, t ) ) ) {
 	    f => new LutSRSim(f)
 	  }
 	}

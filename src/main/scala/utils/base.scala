@@ -33,10 +33,10 @@ object adderType
 object stream
 {
   def binary( dIn : DecoupledIO[Vec[Fixed]], n_paths : Int,
-                  sr : List[Int], forSim : Boolean = true ) : Vector[Fixed] = {
+                  sr : List[Int] ) : Vector[Fixed] = {
 
 
-    val sreg = Module( new LUTSR32( sr, n_paths, forSim ) )
+    val sreg = Module( new LUTSR32( sr, n_paths ) )
     sreg.io.vld := dIn.valid
     
     (0 until n_paths).map(x => Mux( sreg.io.out(x), dIn.bits(x), -dIn.bits(x) ) ).toVector
@@ -46,7 +46,7 @@ object stream
   def ternary( dIn : DecoupledIO[Vec[Fixed]], n_paths : Int,
                   sr : List[Int], forSim : Boolean = true ) : Vector[Fixed] = {
 
-    val sreg = Module( new LUTSR32( sr, 2*n_paths, forSim ) )
+    val sreg = Module( new LUTSR32( sr, 2*n_paths ) )
     sreg.io.vld := dIn.valid
     val sel = sreg.io.out.toVector.grouped(2).toVector
     

@@ -19,8 +19,8 @@ Fastfood Implementation
 class FF( val n_dicts : Int, val n_features : Int, val n_paths : Int, 
   val bitWidth : Int, val fracWidth : Int, val ram : List[List[Int]],
   val g : List[BigInt], val s : List[BigInt], val u : List[Double],
-  val alpha : List[Double], forSim : Boolean = true, clk : Option[Clock] = None, 
-    rst: Option[Bool] = None) extends Module( _clock=clk, _reset=rst ) {
+  val alpha : List[Double], clk : Option[Clock] = None, 
+  rst: Option[Bool] = None) extends Module( _clock=clk, _reset=rst ) {
 
 
   val io = new Bundle{
@@ -40,7 +40,7 @@ class FF( val n_dicts : Int, val n_features : Int, val n_paths : Int,
   // layer 1
   val layer1 = (0 until n_dicts).map( x => Module( new GPHBx(n_features, n_paths, bitWidth, fracWidth, 
                                                               ram( x ), g( x ), adderType.binAdd2, 
-                                                              count.log2Up, out.direct, forSim ) ) ).toVector
+                                                              count.log2Up, out.direct ) ) ).toVector
 
   // hadamard transform
   val layer2 = ( 0 until n_stacks ).map( x => Module( new HAD( n_features, bitWidth, fracWidth ) ) )

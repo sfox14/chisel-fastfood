@@ -45,7 +45,7 @@ object trainVerilog {
     println("Generating verilog for Kernel Expansion module")
     chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
                 () => Module( new TRAIN( n_dicts, n_features, n_paths, bitWidth, fracWidth, 
-                                        ram, G, S, U, alpha, false ) ) )
+                                        ram, G, S, U, alpha ) ) )
   }
 }
 

@@ -60,7 +60,7 @@ class SRL16E_IO extends Bundle {
 
 }
 
-class SRL16Ew( val hex : String, val len : Int, forSim : Boolean = true ) extends BlackBox {
+class SRL16Ew( val hex : String, val len : Int ) extends BlackBox {
   
   val io = new SRL16E_IO
   io.setNames()
@@ -73,17 +73,15 @@ class SRL16Ew( val hex : String, val len : Int, forSim : Boolean = true ) extend
   setModuleName("SRL16E")
 
   // Test the module
-  if ( forSim ){
-    val sreg = Module( new SRL16ETester( hex, len ) )
-    sreg.io.dIn := io.dIn
-    sreg.io.vld := io.vld
-    io.dOut := sreg.io.dOut
-  }
+  val sreg = Module( new SRL16ETester( hex, len ) )
+  sreg.io.dIn := io.dIn
+  sreg.io.vld := io.vld
+  io.dOut := sreg.io.dOut
   
   
 }
 
-class SRL16E( val hex : String, val len : Int, forSim : Boolean = true ) extends Module{
+class SRL16E( val hex : String, val len : Int ) extends Module{
   val io = new Bundle{
     val dIn = Bool( INPUT )
     val vld = Bool( INPUT )
@@ -92,7 +90,7 @@ class SRL16E( val hex : String, val len : Int, forSim : Boolean = true ) extends
   }
 
   // instantiate module, make default connections
-  val srl16e = Module( new SRL16Ew( hex, len, forSim ) )
+  val srl16e = Module( new SRL16Ew( hex, len ) )
   srl16e.io.dIn := io.dIn
   srl16e.io.vld := io.vld
   srl16e.io.a0 := io.len(0)
@@ -115,7 +113,7 @@ class SRL16E_inst extends Module {
   }
 
   val len = 16
-  val srl = Module( new SRL16E( "0000", len, false ) )
+  val srl = Module( new SRL16E( "0000", len ) )
   srl.io.dIn := io.a
   srl.io.len := UInt(len-1, width=4)
   srl.io.vld := Bool(true)

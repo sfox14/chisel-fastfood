@@ -21,7 +21,7 @@ object gphbxVerilog {
     chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
                 () => Module( new GPHBx( n_features, n_paths, bitWidth, fracWidth, 
                                         ram, BigInt(1), adderType.binAdd3, count.log2Up, 
-                                        out.direct, false ) ) )
+                                        out.direct ) ) )
   }
 }
 

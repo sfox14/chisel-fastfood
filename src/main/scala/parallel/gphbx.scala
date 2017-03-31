@@ -11,8 +11,7 @@ GPHBx layer - Serial Processor ( k features per cycle )
 */
 class GPHBx( val n_features : Int, val n_paths : Int, val bitWidth : Int, val fracWidth : Int,
   val ram : List[Int], val G : BigInt, adderFunc : Vector[Fixed] => Fixed, 
-  cycleFunc : Int => Int, outFunc : (Fixed, Fixed, Bool) => (Fixed, Bool), 
-  forSim : Boolean = true ) extends Module {
+  cycleFunc : Int => Int, outFunc : (Fixed, Fixed, Bool) => (Fixed, Bool) ) extends Module {
 
   val io = new Bundle{
 
@@ -44,8 +43,8 @@ class GPHBx( val n_features : Int, val n_paths : Int, val bitWidth : Int, val fr
   computations required, thus eliminating gphbx modules       
   */
 
-  val vdIn = stream.binary( io.dIn, n_paths, ram, forSim )
-  //val vdIn = stream.ternary( io.dIn, n_paths, ram, forSim)
+  val vdIn = stream.binary( io.dIn, n_paths, ram )
+  //val vdIn = stream.ternary( io.dIn, n_paths, ram )
 
 
   // two, three or four input adds

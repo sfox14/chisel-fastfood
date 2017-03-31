@@ -24,7 +24,7 @@ Fastfood Implementation
 class TRAIN( val n_dicts : Int, val n_features : Int, val n_paths : Int, 
   val bitWidth : Int, val fracWidth : Int, val ram : List[List[Int]],
   val g : List[BigInt], val s : List[BigInt], val u : List[Double],
-  val alpha : List[Double], forSim : Boolean = true ) extends Module {
+  val alpha : List[Double] ) extends Module {
 
 
   val io = new Bundle{
@@ -44,7 +44,7 @@ class TRAIN( val n_dicts : Int, val n_features : Int, val n_paths : Int,
   // layer 1
   val layer1 = (0 until n_dicts).map( x => Module( new GPHBx(n_features, n_paths, bitWidth, fracWidth, 
                                                               ram( x ), g( x ), adderType.binAdd3, 
-                                                              count.log2Up, out.direct, forSim ) ) ).toVector
+                                                              count.log2Up, out.direct ) ) ).toVector
 
   // hadamard transform
   val layer2 = ( 0 until n_stacks ).map( x => Module( new HAD( n_features, bitWidth, fracWidth ) ) )
