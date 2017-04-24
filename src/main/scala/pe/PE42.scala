@@ -158,31 +158,23 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
     val hin = UInt(INPUT, bitWidth)
     val sin = UInt(INPUT, bitWidth)
     val yin = UInt(INPUT, bitWidth)
-    //val wApi = UInt(INPUT, width=10)
     
     val xout = UInt(OUTPUT, bitWidth)
     val pout = UInt(OUTPUT, bitWidth)
     val hout = UInt(OUTPUT, bitWidth)
     val sout = UInt(OUTPUT, bitWidth)
     val yout = UInt(OUTPUT, bitWidth)
-    //val wApo = UInt(OUTPUT, width=10)
 
     // Control signals
-    //val func = UInt(INPUT, width=6)
     val s1 = Bool(INPUT)
     val load = Bool(INPUT)
     val incr = Bool(INPUT)
     val proc = Bool(INPUT)
-    val prst = Bool(INPUT)
 
     val init = Bool(INPUT)
     val ih = Bool(INPUT)
     val func = UInt(INPUT, width=3)
-    val write = Bool(INPUT)
-    val hon = Bool(INPUT)
-    val hfon = Bool(INPUT)
-    val hrst = Bool(INPUT)
-    val rstG = Bool(INPUT)
+
   }
 
   println(s"PE_$id: ", ram)
@@ -258,9 +250,9 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
   // connect output ports
   io.xout := x_parr
   io.pout := dat_out
-  when( io.prst ){
-    io.pout := RegInit( UInt( 0, bitWidth ) )
-  }
+  //when( io.prst ){
+    //io.pout := RegInit( UInt( 0, bitWidth ) )
+  //}
   //------------------------------------------------------------------------------------//
   // datapath 2:
   val addrWidth = io.func.getWidth + log2Up(n/p)
@@ -317,6 +309,22 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
     hReg := ShiftRegister( hReg2, (n/p)-1 )
   }*/
 
+
+  // write, hon, rstG decode
+  val hon = ( io.func === UInt(3,3) )
+  val upW = RegNext( ( opCode === UInt(0, 3) ) )
+  val dnW = ShiftRegister( upW, n/p )
+  val write = ( upW && !dnW )
+  val hon1 = RegNext( hon )
+  val rstG = Bool()
+  if( n==p ){
+    rstG := ( hon && !hon1 )
+  }else{
+    rstG := ShiftRegister( write, n/p -1 )
+  }
+
+
+
   val op11_tmp = UInt(width=bitWidth)
   op11_tmp := MuxCase( hReg, Array(
                   ( opCode === UInt(0, 3) ) -> dat_out, 
@@ -324,7 +332,7 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
                   ))
 
   val op11 = UInt(width=bitWidth) // RegInit( UInt(0, width=bitWidth) ) //********
-  op11 := Mux( io.rstG, UInt(0, bitWidth), op11_tmp )
+  op11 := Mux( rstG, UInt(0, bitWidth), op11_tmp ) //io.rstG
 
   // operand 2 (much more complicated)
   //val gsak = RegInit( UInt(0, bitWidth) )
@@ -357,7 +365,7 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
   // n_fix -> loops over the columns (neuron address, slower)
   // n_new -> loops over the rows
   //    eg. read neuron address from n_fix, loop through n_new, increment n_fix and move to next neuron
-  when( io.hon ){
+  when( hon ){ //io.hon
     n_new := n_new + UInt(1)
   }
 
@@ -424,7 +432,7 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
   //}
   dataMem.io.ports(1).req.addr := ( UInt(3,3) ## wAddr )
   dataMem.io.ports(1).req.writeData := res_out
-  dataMem.io.ports(1).req.writeEn := io.write
+  dataMem.io.ports(1).req.writeEn := write //io.write
 
   when( opCode === UInt(5, 3) ){
     sum := alu_out //res_out //alu_out ***************************************
@@ -442,8 +450,6 @@ class PE42( val id : Int, val bitWidth : Int, val fracWidth : Int,
 
 
 }
-
-
 
 
 
