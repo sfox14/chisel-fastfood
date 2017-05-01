@@ -171,15 +171,18 @@ class PEr1( val id : Int, val bitWidth : Int, val fracWidth : Int,
   //    iii.) Starting Hadamard
 
   val hadOn = ( func === UInt(3,3) )
-  val upW = ShiftRegister( ( opCode === UInt(0, 3) ), 1 + oStages + aStages )//+ 3 )//1 ) // or (aluCode, 1)
+  val upW = ShiftRegister( ( opCode === UInt(0, 3) || opCode === UInt(4, 3) ), 1 + oStages + aStages )//+ 3 )//1 ) // or (aluCode, 1)
   val dnW = ShiftRegister( upW, n/p )
   val write = ( upW && !dnW )
   val hadOnDelayed = RegNext( hadOn )
+  val upRst = ShiftRegister( ( opCode === UInt(0, 3) ), 1 + oStages + aStages )
+  val dnRst = ShiftRegister( upRst, n/p )
+  val rst = ( upRst && !dnRst ) 
   val rstG = Bool()
   if( hStages == 0 ){
-    rstG := write
+    rstG := rst
   }else{
-    rstG := ShiftRegister( write, n/p -1 - oStages - aStages ) //Bool()   
+    rstG := ShiftRegister( rst, n/p -1 - oStages - aStages ) //Bool()   
   }
  
   /*
@@ -233,6 +236,7 @@ class PEr1( val id : Int, val bitWidth : Int, val fracWidth : Int,
   
   // Sum all neurons in one PE, and store in register
   val sum = RegInit( UInt(0, width=bitWidth) )
+  val ypred = RegInit( UInt(0, width=bitWidth ) )
 
   // ----------------------------------------------------------------
   // Hadamard Coefficient Generator:
@@ -277,7 +281,7 @@ class PEr1( val id : Int, val bitWidth : Int, val fracWidth : Int,
 
   // 1. BRAM LUT for Cosine function
   def cosFunc( op1 : UInt ): UInt = {
-    op1 + op1
+    RegNext( RegNext( RegNext( op1 ) + RegNext( op1 ) ) )
   }
 
   // 2. Pipelined DSP multiply
@@ -297,14 +301,19 @@ class PEr1( val id : Int, val bitWidth : Int, val fracWidth : Int,
   val alu_out = UInt(width=bitWidth)
   alu_out := MuxCase( UInt(0, bitWidth), Array(
     ( aluCode === UInt(0, 3) || aluCode === UInt(1, 3) || aluCode === UInt(2, 3) ) -> dspMultiply(op11, op22, 1, 2), //RegNext(RegNext(RegNext( RegNext(RegNext(op11)) * RegNext(RegNext(op22)) ))), 
-    ( aluCode === UInt(3, 3) || ( aluCode === UInt(5, 3) ) ) -> adderStage( op11, op22 ),
-    ( aluCode === UInt(6, 3) ) -> ( sReg + sum  ),
+    ( aluCode === UInt(3, 3) ) -> adderStage( op11, op22 ),
     ( aluCode === UInt(4, 3) ) -> ( cosFunc( op11 ) )
                       )) 
-
-  // write alu result to a register
+  // 4. 1-stage sum
+  val pred_out = UInt(width=bitWidth)
+  val prCode = RegNext( aluCode ) 
+  pred_out := MuxCase( ypred, Array(
+    ( prCode === UInt(2, 3) ) -> ( res_out + ypred ),
+    ( prCode === UInt(6, 3) ) -> ( sReg + sum ) 
+                      ))
+  // write alu results to a register
   res_out := alu_out
-
+  ypred := pred_out
   // ----------------------------------------------------------------------------------------------------
   // Write-back
 
@@ -313,18 +322,21 @@ class PEr1( val id : Int, val bitWidth : Int, val fracWidth : Int,
   dataMem.io.ports(1).req.writeData := res_out
   dataMem.io.ports(1).req.writeEn := write
 
-  // write sum to register
-  when( opCode === UInt(5, 3) ){
-    sum := res_out //alu_out *************************************** alu_out //
-  }
-  
-  // Connecting output
+
+
+    // Connecting output
   io.hout := res_out
   io.sout := UInt(0, bitWidth)
   io.yout := y_parr
-  
-  when( opCode === UInt(6,3) ){
-    io.sout := res_out //alu_out // (*try alu_out, but may not hit 500MHz, lose 1 cycle/pe using res_out)
+
+  // one cycle - save intermediate sum
+  when( ( prCode === UInt(5, 3) ) ){
+    sum := ypred
+    io.sout := ypred
+  }
+
+  when( prCode === UInt(6,3) ){
+    io.sout := ypred //alu_out // (*try alu_out, but may not hit 500MHz, lose 1 cycle/pe using res_out)
   }
   
   // can either go io.sout := alu_out or op11 := io.sin to lose the extra register

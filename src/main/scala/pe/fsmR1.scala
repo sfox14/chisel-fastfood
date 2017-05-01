@@ -273,6 +273,8 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
   val dcI = RegInit( UInt( 0, log2Up( iCycles+3 ) ))
   val dcNP = RegInit( UInt( 0, width=log2Up( n/p ) ))
   val sc = RegInit( UInt(0, width=log2Up(sLen) ))
+
+  val nextState = RegInit( UInt(1, width=4) )
   
   when( global === UInt(3) ){
 
@@ -319,19 +321,23 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
         dAdd := Bool(true)
       }
 
+      // stall every n/p cycles of the hadamard
       if( toStall ){
         when( dcNP === UInt( n/p -1 ) ){
           // if stall - then stall
           state := UInt(7)
+          nextState := UInt(2)
           dFunc := UInt(7)
+          dAdd := Bool(false)
         } 
       }
-      
-
+      // stall at the end of hadamard too
       when( dcHad === UInt( d*n/p -1 ) ){
         if( toStall ){
-          state := UInt(8)
+          state := UInt(7)
+          nextState := UInt(3)
           dFunc := UInt(7)
+          dAdd := Bool(false)
         } else{
           state := UInt(3)
           dFunc := UInt(1)
@@ -340,24 +346,106 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
       }
     }
 
-
     when( state === UInt(3) ){
       // dFunc = 1 ( mul s )
       pcNP := pcNP + UInt(1)
       dFunc := UInt(1)
       dAdd := Bool(true)
+
       when( pcNP === UInt(n/p -1) ){
-        dFunc := UInt(7)
-        dAdd := Bool(false)
-        state := UInt(4)
+        if( toStall ){
+          dFunc := UInt(7)
+          nextState := UInt(4)
+          state := UInt(7)
+          dAdd := Bool(false)
+        } else{
+          dFunc := UInt(4)
+          //dAdd := Bool(false)
+          state := UInt(4)
+        }
+        
       }
       if( n==p ){
-        state := UInt(4)
-        dFunc := UInt(7)
-        dAdd := Bool(false)
+        if( toStall ){
+          dFunc := UInt(7)
+          nextState := UInt(4)
+          state := UInt(7)
+          dAdd := Bool(false)
+        } else{
+          state := UInt(4)
+          dFunc := UInt(4)
+          dAdd := Bool(false)
+        }
       }
     }
+
+
     when( state === UInt(4) ){
+      // cosine function
+      pcNP := pcNP + UInt(1)
+      dFunc := UInt(4)
+      dAdd := Bool(true)
+
+      when( pcNP === UInt(n/p -1) ){
+        if( toStall ){
+          dFunc := UInt(7)
+          nextState := UInt(5)
+          state := UInt(7)
+          dAdd := Bool(false)
+        } else{
+          dFunc := UInt(2)
+          //dAdd := Bool(false)
+          state := UInt(5)
+        } 
+      }
+      if( n==p ){
+        if( toStall ){
+          dFunc := UInt(7)
+          nextState := UInt(5)
+          state := UInt(7)
+          dAdd := Bool(false)
+        } else{
+          state := UInt(5)
+          dFunc := UInt(2)
+          dAdd := Bool(false)
+        }
+        
+      }
+    }
+
+    when( state === UInt(5) ){
+      // multiply alpha, dFunc=2, and sum in parallel
+      pcNP := pcNP + UInt(1)
+      dFunc := UInt(2)
+      dAdd := Bool(true)
+
+      when( pcNP === UInt(n/p -1) ){
+        dFunc := UInt(5)
+        state := UInt(6)
+        dAdd := Bool(false) //no mem dependency for the sum
+      }    
+    }
+
+    when( state === UInt(6) ){
+      // save the local accumulated sum, move to next state
+      dFunc := UInt(6)
+      state := UInt(8)
+    }
+
+    when( state === UInt(8) ){
+      // accumulate the PE sums
+      pcP := pcP + UInt(1)
+      dFunc := UInt(6)
+      when( pcP === UInt(p-2) ){
+        dFunc := UInt(7)
+        state := UInt(10)
+        pcP := UInt(0)
+        //dAdd := Bool(false) //no mem dependency for the sum
+      }
+    }
+
+
+    when( state === UInt(10) ){
       // spare
       waiting := Bool(true)
     }
@@ -365,26 +453,53 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
     if( toStall ){
 
       when( state === UInt(7) ){
-        // stall and return to state==2, func=3
+        // stall and return to nextState
         dFunc := UInt(7)
         sc := sc + UInt(1)
-        when( sc === UInt(sLen-1) ){
-          dFunc := UInt(3)
-          state := UInt(2)
-          sc := UInt(0)
+        dAdd := Bool(false)
+        
+        when( nextState === UInt(2) ){
+          // stall to dFunc=3, hadamard
+          when( sc === UInt( sLen -1 ) ){
+            dFunc := UInt(3)
+            sc := UInt(0)
+            state := nextState
+          } 
+        }.elsewhen( nextState === UInt(3) ){
+          // stall to dFunc=1, mul s
+          when( sc === UInt( sLen -1 ) ){
+            dFunc := UInt(1)
+            sc := UInt(0)
+            state := nextState
+            dAdd := Bool(true)
+            if( n==p ){
+              dAdd := Bool(false)
+            }
+          }
+        }.elsewhen( nextState === UInt(4) ){
+          // stall to dFunc=4, cosine (3 pipeline registers)
+          when( sc === UInt( sLen -1 ) ){
+            dFunc := UInt(4)
+            state := nextState
+            sc := UInt(0)
+            dAdd := Bool(true)
+            if( n==p ){
+              dAdd := Bool(false)
+            }
+          }
+        }.elsewhen( nextState === UInt(5) ){
+          // stall to dFunc=2, mul alpha
+          when( sc === UInt( sLen -1 ) ){
+            dFunc := UInt(2)
+            state := nextState
+            sc := UInt(0)
+            dAdd := Bool(true)
+            if( n==p ){
+              dAdd := Bool(false)
+            }    
+          }
         }
-      }
 
-      when( state === UInt(8) ){
-        // stall and move to state==3, func=1, dAdd=true
-        dFunc := UInt(7)
-        sc := sc + UInt(1)
-        when( sc === UInt(sLen-1) ){
-          dFunc := UInt(1)
-          state := UInt(3)
-          dAdd := Bool(true)
-          sc := UInt(0)
-        }
       }
 
     }
@@ -406,6 +521,5 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
   io.ctrl.dload := dLoad
   io.ctrl.dadd := dAdd
   io.ctrl.func := dFunc
-
 
 }
