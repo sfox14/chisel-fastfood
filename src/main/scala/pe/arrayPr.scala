@@ -6,8 +6,6 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.util.Random
 
-import fpgatidbits.ocm._
-
 import utils._
 
 import math._
@@ -16,7 +14,7 @@ import math._
 Multiple Function, Multiple Data, Merged Results
 */
 
-class ARRAY( val bitWidth : Int, val fracWidth : Int, 
+class ARRAYpr( val bitWidth : Int, val fracWidth : Int, 
     val n : Int, val p : Int, val d : Int, val ram : List[List[Int]] ) extends Module {
   val io = new Bundle{
     val xin = UInt(INPUT, bitWidth) //Fixed(INPUT, bitWidth, fracWidth)
@@ -43,11 +41,12 @@ class ARRAY( val bitWidth : Int, val fracWidth : Int,
                   .reduce( _++_ ).grouped( j*n ).toList // groups j*n neurons per node
 
 
-  val array = (0 until p).reverse.map( x => Module( new PE(x, bitWidth, 
-                                              fracWidth, weights(x), n, p, d ) ) )
+  val array = (0 until p).reverse.map( i => Module( new PEr1(i, bitWidth, 
+                                              fracWidth, weights(i), n, p, d ) ) )
 
-  val fsm = Module( new FSM( bitWidth, fracWidth, n, p, d ) )
+  val fsm = Module( new FSMr1( bitWidth, fracWidth, 1024, 256, 512 ) )
 
+  /*
   val fifoDepth = d*10
   val inFifo = Module( new Queue( UInt( width=bitWidth ), fifoDepth ) )
   inFifo.io.enq.bits := io.xin
@@ -55,7 +54,13 @@ class ARRAY( val bitWidth : Int, val fracWidth : Int,
   inFifo.io.deq.ready := ( ( inFifo.io.count >= UInt( p, width=log2Up(p)+1 ) ) && fsm.io.rdy )
 
   // FSM inputs
-  fsm.io.xin := inFifo.io.deq.bits
+  fsm.io.xin := inFifo.io.deq.bits //RegNext( RegNext( inFifo.io.deq.bits ) )
+  fsm.io.yin := UInt(12686, bitWidth) //RegNext( RegNext( UInt(12686, bitWidth) ) ) // UInt(22290, bitWidth) // 249458
+  fsm.io.vld := inFifo.io.deq.valid //RegNext( RegNext( inFifo.io.deq.valid ) )
+  */
+  fsm.io.xin := io.xin
+  fsm.io.yin := UInt(12686, bitWidth)
+  fsm.io.vld := Bool(true)
 
   // connect array
   array(0).io.pin := array(p-1).io.pout 
@@ -78,88 +83,39 @@ class ARRAY( val bitWidth : Int, val fracWidth : Int,
     }
   }
 
+  val ctrlFanOut_0 = RegNext( fsm.io.ctrl )
+  val ctrlFanOut_1 = RegNext( ctrlFanOut_0 )
+
   // control signals
   for( ix <- 0 until p){
-    array( ix ).io.ctrl <> fsm.io.ctrl
+    array( ix ).io.ctrl := ctrlFanOut_1 //ShiftRegister( fsm.io.ctrl, 4 )
   }
 
-  io.yout := array(0).io.hout + array(1).io.hout
+  io.yout := array(0).io.sout + array(23).io.sout
 
 
 }
 
 
-class arraySim( c: ARRAY ) extends Tester( c ){
-
-  val n = c.n
-  val d = c.d
-  val p = c.p
-
-  var k = 0
-
-  val rng = new Random( 33 )
-
-  for( ix <- 0 until d*2 ){
-    poke( c.io.xin, BigInt( rng.nextInt( 10 ) ) )
-    step(1)
-  }
-  step(250)
-
-}
 
 
-object arrayTester{
+object arrayPrVerilog{
 
   val bitWidth = 18
   val fracWidth = 10
+  val n = 1024 //128 //1024 //128 //16
+  val p = 256 //32 //256 //16 //4
+  val d = 512 //64 //512 //64 //8
 
-  val n = 8//16
-  val p = 8//2
-  val d = 8
-
-  /*
-  val ram = List( List(1,0,1,0),
-                  List(1,1,1,1), //) //,
-                  List(0,0,1,0),
-                  List(1,1,1,1),
-                  List(1,0,1,0),
-                  List(1,1,1,1), //) //,
-                  List(0,0,1,0),
-                  List(1,0,1,1)
-                   )
-  */
-  ///*
-  val ram = List( List(1,0,1,0,1,0,1,0),
-                  List(1,1,1,1,1,1,1,1), //) //,
-                  List(0,0,1,0,0,0,1,0),
-                  List(1,1,1,1,1,1,1,1),
-                  List(1,0,1,0,1,0,1,0),
-                  List(1,1,1,1,1,1,1,1), //) //,
-                  List(0,0,1,0,0,0,1,0),
-                  List(1,0,1,1,1,0,1,1)
-                   )
-  //*/
-  /*
-  val ram = List( List(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0),
-                  List(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1), //) //,
-                  List(0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0),
-                  List(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1),
-                  List(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0),
-                  List(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1), //) //,
-                  List(0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0),
-                  List(1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1)
-                   )
-  */
-
+  val rng = new Random( 33 )
+  val ram = ( 0 until d ).map( x => (0 until n).map( y => rng.nextInt(2) ).toList ).toList
 
 
   def main(args: Array[String]): Unit = {
-    println("Testing the FSM for controlling the array")
-    
-    chiselMainTest(Array("--genHarness", "--test", "--backend", "c", //"--wio", 
-      "--compile", "--targetDir", ".emulator", "--vcd"), // .emulator is a hidden directory
-      () => Module(new ARRAY( bitWidth, fracWidth, n, p, d, ram ) ) ) {
-        f => new arraySim( f )
-      }
+    println("Generating verilog for the 4-4-4 array of PEs")
+    chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
+                () => Module( new ARRAYpr( bitWidth, fracWidth, n, p, d, ram ) ) ) //PE42( 0, bitWidth, fracWidth, weights, n, p, d ) ) )
   }
+
+
 }

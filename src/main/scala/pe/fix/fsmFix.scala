@@ -1,4 +1,4 @@
-package pe
+package fix
 
 import Chisel._
 import com.github.tototoshi.csv._
@@ -6,24 +6,30 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.util.Random
 
-import fpgatidbits.ocm._
-
 import utils._
 
 import math._
 
+/*
+Finite State Machine:
+  - fixed point
+  - does not use ctrl.io.pinc
+  - LFSR based phbx, where the enable=padd 
+*/
 
 
-class FSMr1( val bitWidth : Int, val fracWidth : Int, 
-    val n : Int, val p : Int, val d : Int ) extends Module{
+class FSMfix( val bitWidth : Int, val fracWidth : Int, 
+    val n : Int, val p : Int, val d : Int, 
+    val aStages : Int, val cosFlag : Boolean = false ) extends Module{
 
   val io = new Bundle{
-    val xin = UInt(INPUT, bitWidth)
-    val yin = UInt(INPUT, bitWidth)
+    //val xin = Fixed(INPUT, bitWidth, fracWidth)
+    //val yin = Fixed(INPUT, bitWidth, fracWidth)
     val vld = Bool(INPUT)
-    val rdy = Bool(OUTPUT)
-    val yout = UInt(OUTPUT, bitWidth)
-    val xout = UInt(OUTPUT, bitWidth)
+    val xrdy = Bool(OUTPUT)
+    val yrdy = Bool(OUTPUT)
+    //val yout = Fixed(OUTPUT, bitWidth, fracWidth)
+    //val xout = Fixed(OUTPUT, bitWidth, fracWidth)
 
     val ctrl = new CtrlIO()
   }
@@ -37,41 +43,70 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
   val regOut = 2
   val mStages = 2*regIn + regOut //mem stages 
   val oStages = 1 // operand before alu
-  val aStages = 3 // alu
+  //val aStages = 3 
 
   val hStages =  max(-1, n/p -1 - oStages - aStages) // length of hReg
   val toStall = ( hStages == -1 ) // true or false
-  val sLen = abs( n/p -1 - oStages - aStages ) //stall cycles
+  val sLen = max(aStages + 1 + oStages - (n/p), 0) //stall cycles
 
   val dStages = mStages + n/p -2 //cycles that dpath2 starts ahead of pLoad
+  /*
+  iCycles:
+    - time (# cycles) from dFunc=0 to dFunc=3
+    - to compute one multiply = oStages + aStages + 1, i.e. aStages + 2
+    - to write and then read one result = mStages
+    - therefore, we can begin dFunc=3 for the first dictionary after
+      aStages + 2 + mStages 
+    - but, we can't start dFunc=3 before all the dictionaries are processed by
+      dFunc=0.  
+    - therefore, max(n/p, aStages+2+mStages), i.e. iCycles >= n/p and if greater than,
+      then there is a stall 
+  */
+  val iCycles = max(n/p, aStages + 2 + mStages) // 2 - oStages + res_out reg
+  
+  // number of cycles to stall
+  val latency_had = d*d/(d*p/n) + sLen*d 
+  val latency_phb = n*(d/p)
+  var latency_alu = iCycles + latency_had + max(n/p, aStages+2)*3 + (n/p)*2 + (aStages+2)*2 + p + 3 //(aStages + 2)*6 + (n/p)*3 + 2
+  if( cosFlag ){
+    // ensure there is a stall for (aStages + 1) before alpha, i.e. dFunc=2
+    if( toStall ){
+      // add the remaining part of stall
+      latency_alu = latency_alu + n/p -1
+    } else{
+      // add the full stall
+      latency_alu = latency_alu + aStages + 1
+    }
+  }
 
-  //val iCycles = max( mStages + 1, (n/p)+1 ) // stages between dFunc=0 and dFunc=3 
-  val sCycles = 100 // stall dpath1, parameterise this
+  val latency_total = latency_phb + latency_alu - (n/p - 1)
+  val throughput = max( latency_alu, latency_phb )
+  val sCycles = max( latency_alu - latency_phb, 0 ).toInt + 1 //for the fsm transition
 
-
+  println( s"Hadamard Latency: $latency_had" )
+  println( s"PHBx Latency: $latency_phb")
+  println( s"ALU Latency: $latency_alu")
+  println( s"Total Latency: $latency_total")
+  println( s"Stall: $sCycles")
+  println( s"Throughput: $throughput")
+  
   // state registers
   val global = RegInit( UInt(0, width=2) )
   val initial = RegInit( UInt(0, width=2) )
-  val state = RegInit( UInt(0, width=4) ) //dpath2
+  val state = RegInit( UInt(0, width=4) )
   val stall = RegInit( Bool(false) )
   val waiting = RegInit( Bool(false) )
 
   // control signal registers (9-bit)
   val ready = RegInit( Bool(false) )
+  val outReady = RegInit( Bool(false) )
   val pRst = RegInit( Bool(false) )
   val pLoad = RegInit( Bool(false) )
-  val pInc = RegInit( Bool(false) )
+  //val pInc = RegInit( Bool(false) )
   val pAdd = RegInit( Bool(false) )
   val dLoad = RegInit( Bool(false) )
   val dAdd  = RegInit( Bool(false) )
-  val dFunc = RegInit( UInt(0, width=3) )
-
-
-  // output nets and default connections
-  val xout = UInt(width=bitWidth)
-  xout := io.xin
-  val yout = UInt(width=bitWidth)
-  yout := io.yin
+  val dFunc = RegInit( UInt(0, width=4) )
 
 
   // FSM counters
@@ -86,101 +121,19 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
   //val dcI = RegInit( UInt(0, log2Up( iCycles ) ))
   val dcD = RegInit( UInt(0, log2Up( d ) ))
   val dcHad = RegInit( UInt(0, log2Up( d*n/p ) )) //hadamard
+  val dcP = RegInit( UInt(0, width=log2Up( p )) )
+  val dcNP = RegInit( UInt(0, width=log2Up( n/p )) )
 
 
-  // pLoad g, s, alpha from ROM
-  val bram = Vec( (0 until 3*n).map( x => UInt( BigInt( rng.nextInt(5) ), width=bitWidth ) ) ) 
-  val iAddr = RegInit( UInt( 0, width=3*n-1 ) )
-  val gsa = ShiftRegister( bram( iAddr ), regOut)
-  
-
-
-  // Stage 0: Start reading from gsa BRAM regIn (i.e. 2) cycles early 
-
+ 
   when( global === UInt(0) ){
-    // initial stage, start gsa before global == 1, master/system reset
-    iAddr := iAddr + UInt(1)
-    xout := gsa( iAddr )
-    when( iAddr === UInt(2-1) ){
-      global := UInt(1)
-    }
-  }
+    // there is p data in the fifo
+    when( io.vld ){
 
-  // Stage 1: Initialiasation
-
-  when( global === UInt(1) ){
-    iAddr := iAddr + UInt(1)
-    when( initial === UInt(0) ){
-      // pLoad/init g
-      xout := gsa
-      pcN := pcN + UInt(1)
+      ready := Bool(true)
       pcP := pcP + UInt(1)
-      dLoad := Bool(false)
-      dAdd := Bool(false)
-      dFunc := UInt(0)
       when( pcP === UInt( p-1 ) ){
-        dLoad := Bool(true)
-        dAdd := Bool(true) // for n==p, addr := addr (below)
-        pcNP := pcNP + UInt(1)
-      }
-      when( pcNP === UInt( n/p -1 ) && pcP === UInt( p-1 ) ){
-        //dFunc := UInt(1)
-        initial := UInt(1)
-      }  
-    }
-
-    when( initial === UInt(1) ){
-      // pLoad/init S
-      xout := gsa
-      pcN := pcN + UInt(1)
-      pcP := pcP + UInt(1)
-      dLoad := Bool(false)
-      dAdd := Bool(false)
-      dFunc := UInt(1)
-      when( pcP === UInt( p-1 ) ){
-        dLoad := Bool(true)
-        dAdd := Bool(true) // for n==p, addr := addr (below)
-        pcNP := pcNP + UInt(1)
-      }
-      when( pcNP === UInt( n/p -1 ) && pcP === UInt( p-1 ) ){
-        //dFunc := UInt(2)
-        initial := UInt(2)
-      }
-    }
-
-    when( initial === UInt(2) ){
-      // pLoad/init alpha
-      xout := gsa
-      pcN := pcN + UInt(1)
-      pcP := pcP + UInt(1)
-      dLoad := Bool(false)
-      dAdd := Bool(false)
-      dFunc := UInt(2)
-      when( pcP === UInt( p-1 ) ){
-        dLoad := Bool(true)
-        dAdd := Bool(true) // for n==p, addr := addr (below)
-        pcNP := pcNP + UInt(1)
-      }
-      when( pcNP === UInt( n/p -1 ) && pcP === UInt( p-1 ) ){
-        //dFunc := UInt(7)
-        //dAdd := Bool(false)
-        initial := UInt(3)
-        pcN := UInt(0) //make sure
-        ready := Bool(true) //ready for xin
-      }
-    }
-
-    when( initial === UInt(3) ){
-      // pLoad/init xin, yin
-      xout := io.xin
-      yout := io.yin
-      pcP := pcP + UInt(1)
-      dLoad := Bool(false)
-      dAdd := Bool(false)
-      pLoad := Bool(false)
-      dFunc := UInt(7)
-      when( pcP === UInt( p-1 ) ){
-        // pLoad, and start pAdd counter
+        // move to compute stage
         pLoad := Bool(true)
         pAdd := Bool(true)
         global := UInt(2)
@@ -190,9 +143,7 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
         }
       }
     }
-
   }
- 
 
   // Stage 2: dpath 1, pLoad, ready, pAdd, pInc, pRst
 
@@ -213,11 +164,11 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
       pcP := pcP + UInt(1)
 
       pLoad := Bool(false)
-      pInc := Bool(false)
+      //pInc := Bool(false)
       
       when( pcN === UInt( n-1 ) ){
         pLoad := Bool(true)
-        pInc := Bool(true)
+        //pInc := Bool(true)
         ready := Bool(false)
         if( d==p ){
           pcD := pcD
@@ -253,7 +204,7 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
 
     when( stall ){
       pLoad := Bool(false)
-      pInc := Bool(false)
+      //pInc := Bool(false)
       sDelay := sDelay + UInt(1)
       if( sCycles > 0 ){
         when( sDelay === UInt(sCycles-1) ){
@@ -267,12 +218,10 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
   }
 
   // Stage 3:
-  val opReg = 1
-  val aluReg = 3
-  val iCycles = max( mStages + 1, (n/p)+1 ) + opReg //+ aluReg
+
   val dcI = RegInit( UInt( 0, log2Up( iCycles+3 ) ))
-  val dcNP = RegInit( UInt( 0, width=log2Up( n/p ) ))
   val sc = RegInit( UInt(0, width=log2Up(sLen) ))
+  val sca = RegInit( UInt(0, width=log2Up(sLen + n/p)) )
 
   val nextState = RegInit( UInt(1, width=4) )
   
@@ -287,13 +236,27 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
       dcI := dcI + UInt(1)
 
       when( pcNP === UInt(n/p -1) ){
-        state := UInt(1)
-        dFunc := UInt(7)
+        if( iCycles == n/p ){
+          // no stall
+          state := UInt(2) 
+          dFunc := UInt(3) 
+          //dcI := UInt(0) //reset
+        } else{
+          //stall
+          state := UInt(1)
+          dFunc := UInt(7)
+        }
         dAdd := Bool(false)
       }
       if( n==p ){
-        state := UInt(1)
-        dFunc := UInt(7)
+        if( iCycles == n/p ){
+          // no stall
+          state := UInt(2)
+          dFunc := UInt(3)
+        }else{
+          state := UInt(1)
+          dFunc := UInt(7)
+        }
         dAdd := Bool(false)
       }
 
@@ -303,7 +266,7 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
       // dFunc = 7 (rstG)
       dFunc := UInt(7)
       dcI := dcI + UInt(1)
-      when( dcI === UInt( iCycles-1+3 ) ){
+      when( dcI === UInt( iCycles - 1 ) ){  
         dcI := UInt(0)
         state := UInt(2)
         dFunc := UInt(3)
@@ -348,11 +311,11 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
 
     when( state === UInt(3) ){
       // dFunc = 1 ( mul s )
-      pcNP := pcNP + UInt(1)
+      dcNP := dcNP + UInt(1)
       dFunc := UInt(1)
       dAdd := Bool(true)
 
-      when( pcNP === UInt(n/p -1) ){
+      when( dcNP === UInt(n/p -1) ){
         if( toStall ){
           dFunc := UInt(7)
           nextState := UInt(4)
@@ -382,12 +345,12 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
 
     when( state === UInt(4) ){
       // cosine function
-      pcNP := pcNP + UInt(1)
+      dcNP := dcNP + UInt(1)
       dFunc := UInt(4)
       dAdd := Bool(true)
 
-      when( pcNP === UInt(n/p -1) ){
-        if( toStall ){
+      when( dcNP === UInt(n/p -1) ){
+        if( toStall || cosFlag ){
           dFunc := UInt(7)
           nextState := UInt(5)
           state := UInt(7)
@@ -399,7 +362,7 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
         } 
       }
       if( n==p ){
-        if( toStall ){
+        if( toStall || cosFlag ){
           dFunc := UInt(7)
           nextState := UInt(5)
           state := UInt(7)
@@ -415,11 +378,11 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
 
     when( state === UInt(5) ){
       // multiply alpha, dFunc=2, and sum in parallel
-      pcNP := pcNP + UInt(1)
+      dcNP := dcNP + UInt(1)
       dFunc := UInt(2)
       dAdd := Bool(true)
 
-      when( pcNP === UInt(n/p -1) ){
+      when( dcNP === UInt(n/p -1) ){
         dFunc := UInt(5)
         state := UInt(6)
         dAdd := Bool(false) //no mem dependency for the sum
@@ -434,18 +397,88 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
 
     when( state === UInt(8) ){
       // accumulate the PE sums
-      pcP := pcP + UInt(1)
+      dcP := dcP + UInt(1)
       dFunc := UInt(6)
-      when( pcP === UInt(p-2) ){
-        dFunc := UInt(7)
-        state := UInt(10)
-        pcP := UInt(0)
+      when( dcP === UInt(p-1) ){
+        dFunc := UInt(8)
+        state := UInt(9)
+        dcP := UInt(0)
+        outReady := Bool(true)
         //dAdd := Bool(false) //no mem dependency for the sum
       }
     }
 
+    when( state === UInt(9) ){
+      //compute the error, then stall for 5 cycles
+      outReady := Bool(false)
+      dFunc := UInt(7)
+      dcN := dcN + UInt(1)
+      when( dcN === UInt( oStages + aStages + 1 ) ){ // 1 stage prCode
+        dcN := UInt(0)
+        dFunc := UInt(9)
+        state := UInt(10)
+      }
+    }
 
     when( state === UInt(10) ){
+      // multiply err*eta, stall for 5 stages, then move to kernel mul
+      dFunc := UInt(7)
+      dcN := dcN + UInt(1)
+      when( dcN === UInt( oStages + aStages + 1 ) ){
+        dcN := UInt(0)
+        dFunc := UInt(11)
+        dAdd := Bool(true)
+        state := UInt(11)
+      }
+    }
+
+    when( state === UInt(11) ){
+      
+      dFunc := UInt(11)
+      dAdd := Bool(true)
+      dcNP := dcNP + UInt(1)
+      when( dcNP === UInt( n/p-1 ) ){
+
+        if( toStall ){
+          dFunc := UInt(7)
+          nextState := UInt(12)
+          state := UInt(7)
+          dAdd := Bool(false)
+        } else{
+            dFunc := UInt(10)
+            //dAdd := Bool(false)
+            state := UInt(12)
+        } 
+        if( n==p ){
+          if( toStall ){
+            dFunc := UInt(7)
+            nextState := UInt(12)
+            state := UInt(7)
+            dAdd := Bool(false)
+          } else{
+            state := UInt(12)
+            dFunc := UInt(10)
+            dAdd := Bool(false)
+          }
+          
+        }
+      }
+
+    }
+
+    when( state === UInt(12) ){
+      // update alpha
+      dFunc := UInt(10)
+      dAdd := Bool(true)
+      dcNP := dcNP + UInt(1)
+      when( dcNP === UInt( n/p -1 ) ){
+        dFunc := UInt(7)
+        state := UInt(14)
+        dAdd := Bool(false)
+      }
+    }
+
+    when( state === UInt(14) ){
       // spare
       waiting := Bool(true)
     }
@@ -489,35 +522,76 @@ class FSMr1( val bitWidth : Int, val fracWidth : Int,
           }
         }.elsewhen( nextState === UInt(5) ){
           // stall to dFunc=2, mul alpha
-          when( sc === UInt( sLen -1 ) ){
+          // if cosFlag, stall for longer
+          var caLen = 0
+          if( toStall ){
+            caLen += sLen
+          }
+          if( cosFlag ){
+            caLen += (n/p -1)
+          }
+          sca := sca + UInt(1)
+          sc := UInt(0)
+          when( sca === UInt( caLen - 1 ) ){
             dFunc := UInt(2)
             state := nextState
+            sca := UInt(0)
+            dAdd := Bool(true)
+            if( n==p ){
+              dAdd := Bool(false)
+            }    
+          }
+        }.elsewhen( nextState === UInt(12) ){
+          // stall to dFunc=10, update alpha
+          when( sc === UInt( sLen -1 ) ){
+            dFunc := UInt(10)
+            state := nextState
             sc := UInt(0)
+            dAdd := Bool(true)
+            if( n==p ){
+              dAdd := Bool(false)
+            }
+          }
+        }
+
+      }
+    }
+    if( !toStall & cosFlag ){
+
+      when( state === UInt(7) ){
+        dFunc := UInt(7)
+        dAdd := Bool(false)
+
+        when( nextState === UInt(5) ){
+          var caLen = aStages + 1 //n/p -1
+          sca := sca + UInt(1)
+          when( sca === UInt( caLen - 1 ) ){
+            dFunc := UInt(2)
+            state := nextState
+            sca := UInt(0)
             dAdd := Bool(true)
             if( n==p ){
               dAdd := Bool(false)
             }    
           }
         }
-
       }
 
     }
 
+
   }
+  println( toStall, cosFlag )
 
 
-  // connect outputs and apply timing configuration
-
-  io.xout := RegNext( xout ) //ctrl signals are latched locally
-  io.yout := RegNext( yout ) // ctrl signals are latched locally
-  io.rdy := ShiftRegister( ready, dStages )
-
+  io.xrdy := ShiftRegister( ready, dStages )
+  io.yrdy := ShiftRegister( outReady, 2 + 1 + mStages + oStages + aStages ) //dFunc to aluCode
 
   io.ctrl.prst := ShiftRegister( RegNext(pRst), dStages )
   io.ctrl.pload := ShiftRegister( pLoad, dStages )
-  io.ctrl.pinc := ShiftRegister( RegNext(pInc), dStages - regOut - 1 )
-  io.ctrl.padd := ShiftRegister( RegNext(pAdd), dStages - regOut )
+  io.ctrl.padd := ShiftRegister( pAdd, dStages )
+  //io.ctrl.pinc := ShiftRegister( RegNext(pInc), dStages - regOut - 1 )
+  //io.ctrl.padd := ShiftRegister( RegNext(pAdd), dStages - regOut )
   io.ctrl.dload := dLoad
   io.ctrl.dadd := dAdd
   io.ctrl.func := dFunc
