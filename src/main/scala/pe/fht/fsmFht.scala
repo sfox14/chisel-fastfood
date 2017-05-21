@@ -53,7 +53,7 @@ class FSMfht( val bitWidth : Int, val fracWidth : Int,
   val pLoad = RegInit( Bool(false) )
   val pAdd = RegInit( Bool(false) )
   val dFunc = RegInit( UInt(0, width=4) )
-  val sX = RegInit( UInt(0, width=3) )
+  val sX = RegInit( UInt(4, width=3) )
 
 
   // FSM counters
@@ -96,7 +96,7 @@ class FSMfht( val bitWidth : Int, val fracWidth : Int,
         pcD := UInt(0)
         // start LFSR, and hin write-back via switch
         pAdd := Bool(true)
-        sX := UInt(1)
+        sX := UInt(0)
       
       }
 
@@ -139,7 +139,7 @@ class FSMfht( val bitWidth : Int, val fracWidth : Int,
           pAdd := Bool(false) // end of dFunc=0
           pAdd := Bool(true) // start of dFunc=1
           pcB := UInt(0)
-          sX := UInt(0) // keep data local
+          sX := UInt(4) // keep data local
         }
         pcK := UInt(0)
       }
@@ -150,7 +150,7 @@ class FSMfht( val bitWidth : Int, val fracWidth : Int,
       dFunc := UInt(1)
       pcK := pcK + UInt(1)
       pAdd := Bool(true)
-      sX := UInt(0)
+      sX := UInt(4)
 
       when( pcK === UInt( k-1 ) ){
         pcP := pcP + UInt(1)
@@ -171,7 +171,7 @@ class FSMfht( val bitWidth : Int, val fracWidth : Int,
 
   }
 
-
+  val eStages = 3
 
   io.xrdy := ShiftRegister( ready, mStages - 1 ) //mStages - 1 )
   io.yrdy := outReady //dFunc to aluCode
@@ -182,6 +182,6 @@ class FSMfht( val bitWidth : Int, val fracWidth : Int,
 
   io.ctrl.pe.func := dFunc
 
-  io.ctrl.pe.sx := ShiftRegister( sX, mStages + 2 ) //2 = delay through pipeline, mStages + 1 + aStages + 1
+  io.ctrl.pe.sx := ShiftRegister( sX, mStages + eStages ) //eStages = delay through pipeline, mStages + 1 + aStages + 1
 
 }

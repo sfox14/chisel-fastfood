@@ -6,7 +6,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.ListBuffer
 import scala.util.Random
 
-import pe._
+//import pe._
 
 import utils._
 
@@ -98,6 +98,10 @@ class ARRAYfht( val bitWidth : Int, val fracWidth : Int,
   
   // FSM inputs
   fsm.io.vld := readyToStart
+  
+  //fsm.io.vld := Bool(true)
+  //array(0).io.xin := RegNext( RegNext( io.inData.bits(0) ) )
+  //array(0).io.yin := RegNext( RegNext( io.inData.bits(1) ) )
 
     // connect array   
   array(0).io.xin := RegNext( RegNext( inFifo.io.deq.bits(0) ) ) //fsm.io.xout
@@ -119,7 +123,7 @@ class ARRAYfht( val bitWidth : Int, val fracWidth : Int,
   //io.outData.valid := fsm.io.yrdy
 
   // dummy tester
-  io.outData.bits := array(0).io.sout 
+  io.outData.bits := RegNext( array(0).io.sout ) //+ RegNext( array(31).io.sout )
 
 
 }

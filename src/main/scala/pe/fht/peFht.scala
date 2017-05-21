@@ -83,30 +83,33 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   val b = p/h
 
   val mStages = 1 //4 //4
+  val eStages = 3 // extra = dat_out + op1/op2 + other pipeline registers
   
-  Predef.assert( ( k/2 ) > aStages + mStages + 2, "Error: Maximum switch, k/2, greater than the number of pipeline stages in datapath" )
+  Predef.assert( ( k/2 ) >= aStages + mStages + eStages, "Error: Maximum switch, k/2, greater than the number of pipeline stages in datapath" )
 
   // input load
   val x_parr = Reg( init=Fixed(0, bitWidth, fracWidth), next=io.xin )
   val x_data = ShiftRegisterEnable( x_parr, k, en=pload ) // ShiftEnableRegister
 
   // func shift registers
-  val opCode = ShiftRegister( func, mStages )
+  val opCode = ShiftRegister( func, mStages + 1 ) // extra pipeline stage between preg and op1
   val aluCode = ShiftRegister( opCode, 1 + aStages )
 
   // application registers
   val dat_out = RegInit( Fixed(0, bitWidth, fracWidth) )
 
   // PE memory
-  val preg = ShiftRegister( dat_out, k - aStages - 2 )
+  val preg = ShiftRegister( dat_out, k - aStages - eStages )
 
   val hin = Fixed(width=bitWidth, fracWidth=fracWidth)
-  hin := MuxCase( dat_out, Array( 
-          ( sx === UInt(1, 3) ) -> io.hin( 0 ), //*note: changes in sx should be aligned with dat_out
-          ( sx === UInt(2, 3) ) -> io.hin( 1 )//,
-          //( sx === UInt(3, 3) ) -> io.hin( 2 ) //,
-          //( sx === UInt(4, 3) ) -> io.hin( 3 ) 
-              ))
+  val hSel = Bool()
+  hSel := ( sx === UInt(0, 3) || sx === UInt(1, 3) )
+  if( b == 8 ){
+    hSel := ( sx === UInt(0, 3) || sx === UInt(1, 3) || sx === UInt(2, 3) )
+  } else if( b == 16 ){
+    hSel := ( sx === UInt(0, 3) || sx === UInt(1, 3) || sx === UInt(2, 3) || sx === UInt(3, 3) )
+  }
+  hin := Mux( hSel, io.hin(sx), dat_out ) //, //*note: changes in sx should be aligned with dat_out
 
 
   val kern = (0 until k).map( x => BigInt(0) ).toVector
@@ -116,6 +119,11 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   //val ram = (0 until 8*k).map( x => BigInt(0) )
   val dataMem = Module( new DualPortBRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
                                           log2Up(8*k), id, ram, forSim ) )
+
+  /*
+  val dataMem = Module( new PipelinedDualPortBRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
+                                          log2Up(8*k), 1, 2, id, ram, forSim ) )
+  */
 
   // PE data counter
   val counter = RegInit( UInt(0, log2Up(k)) )
@@ -128,13 +136,13 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   agen.io.counter := counter
   agen.io.func := func
   val rdAddr = agen.io.rdAddr
-  val wrAddr = ShiftRegister( agen.io.wrAddr, mStages + 1 + aStages + 1 - 1 ) // delay, -1, pipeline stage in AddrGen
+  val wrAddr = ShiftRegister( agen.io.wrAddr, mStages + aStages + eStages - 1 ) // delay, -1, pipeline stage in AddrGen
 
   // write enable
   val write = ShiftRegister( (  opCode === UInt(8, 4) || 
                                 opCode === UInt(0, 4) ||
                                 opCode === UInt(1, 4)    
-                              ), 1 + 1 + aStages )
+                              ), eStages-1 + aStages )
 
 
   // port0 - read
@@ -151,7 +159,7 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   val randb = Module( new LFSR( 35605 ) ) // 45687 ) )  // 
   randb.io.en := RegNext( pload )  //***
   val index = randb.io.out
-  val op_bx = Fixed( width=bitWidth, fracWidth=fracWidth )
+  val op_bx = RegInit( Fixed(0, bitWidth, fracWidth) ) //Fixed( width=bitWidth, fracWidth=fracWidth )
   op_bx := x_data
   when( !index ){
     op_bx := -x_data
@@ -163,11 +171,11 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   sign.io.counter := counter
   sign.io.lvl := agen.io.lvl
   val pSel = Bool()
-  pSel := ShiftRegister( sign.io.out, mStages )
+  pSel := ShiftRegister( sign.io.out, mStages  )
 
 
   // select operand 1
-  val psign = Fixed(width=bitWidth, fracWidth=fracWidth)
+  val psign = RegInit( Fixed(0, bitWidth, fracWidth) ) //Fixed(width=bitWidth, fracWidth=fracWidth)
   psign := Mux( pSel, preg, -preg )
 
   val op1 = RegInit( Fixed(0, bitWidth, fracWidth) )
@@ -181,9 +189,9 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   // select operand 2
   val op2 = RegInit( Fixed(0, bitWidth, fracWidth) )
   op2 := MuxCase( Fixed(0, bitWidth, fracWidth), Array(
-        ( opCode === UInt(0) || opCode === UInt(1) ) -> hreg 
+        ( opCode === UInt(0) || opCode === UInt(1) ) -> RegNext( hreg ) //match extra pipeline stage 
                 ))
-
+  
 
   // alu operations
 
@@ -223,13 +231,21 @@ class SignGen( val id : Int, k : Int, b : Int ) extends Module{
   val hcg = ( io.counter & io.lvl )
 
   // hardcode the register pattern for lvl = {2, 3, 4}
-  val a4 = List( List(1,1), List(1,0), List(0,1), List(0,0) )
-  val a8 = List( List(1,1,1), List(1,1,0), List(1,0,1), List(1,0,0),
-                 List(0,1,1), List(0,1,0), List(0,0,1), List(0,0,0) )
+  def parity( x : Int ) : Boolean = {
+    var k = 0
+    var d = x
+    while( d != 0 ){
+      k = k + 1
+      d = d & (d-1)
+    }
+    ( k%2 == 0)
+  }
 
+  val a = ( 0 until b ).map( x => (0 until log2Up(b) ).reverse.map( y => parity( x & ( pow(2,y).toInt ) ) ) )
 
+  //val a4 = List( List(1,1), List(1,0), List(0,1), List(0,0) )
 
-  val s0 = a4( id ).map( x => RegInit( Bool( x == 1 ) ) )
+  val s0 = a( id ).map( x => RegInit( Bool( x ) ) )
   val s1 = !xorR( hcg ) // xor-reduce
   
 
@@ -299,7 +315,7 @@ class AddrGen( k : Int ) extends Module{
   wrAddr := Mux( wSel, wHad, wDefault )
 
 
-  // delay = (from func -> dat_out) = mStages + 1 + aStages + 1
+  // delay = (from func -> dat_out) = mStages + aStages + eStages
 
   // connect outputs
   io.rdAddr := rdAddr

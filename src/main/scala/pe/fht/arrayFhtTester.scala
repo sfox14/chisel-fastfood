@@ -38,11 +38,13 @@ class arrayFhtSim( c: ARRAYfht ) extends Tester( c ){
 
   poke( c.io.inData.valid, true )
 
+  val basic = ( 0 until d ).map( x => x.toFloat/1000 )
+
   // just the first 4 training examples
   for( ix <- 0 until 4 ){
     poke( c.io.inData.bits(1), toFixed( ydat(ix), fracWidth ) )
     for( iy <- 0 until d ){
-      poke(c.io.inData.bits(0), toFixed( rng.nextFloat, fracWidth ) ) //xdat(ix)(iy)
+      poke(c.io.inData.bits(0), toFixed( rng.nextFloat, fracWidth ) ) //basic(iy), xdat(ix)(iy)
       step(1)
     }
   }
@@ -110,9 +112,9 @@ object arrayFhtTester{
   val fracWidth = 10
 
   val sigma = 11.47
-  val n = 32 //16  //16
-  val p = 4 //4   //2
-  val d = 32
+  val n = 32 //128 //64 //32 //16  //16
+  val p = 4 //16 //8  //4   //2
+  val d = 32 //128 //64 //32
 
 
   // alu stages
@@ -161,9 +163,9 @@ object arrayFhtVerilog{
   val fracWidth = 10
   
   val sigma = 11.47
-  val n = 128
-  val p = 16
-  val d = 32
+  val n = 4096 //1024 //128
+  val p = 128 //16
+  val d = 256 //128 //32
 
   // alu stages
   val aStages = 0
