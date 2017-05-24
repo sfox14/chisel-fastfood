@@ -67,8 +67,8 @@ class ARRAYfht( val bitWidth : Int, val fracWidth : Int,
   Predef.assert( p>1, "Error: P must be greater than 1")
   Predef.assert( (d & (d - 1)) == 0, "Error: X dimensionality is NOT a power of 2")
   Predef.assert( p<=d, "Error: Number of PE's should not be greater than dimensionality")
-  Predef.assert( (p & (p-1)) == 0, "Error: P is NOT a power of 2" )
-  Predef.assert( (n & (n-1)) == 0, "Error: N is NOT a power of 2" ) // required for this implemtation
+  //Predef.assert( (p & (p-1)) == 0, "Error: P is NOT a power of 2" )
+  //Predef.assert( (n & (n-1)) == 0, "Error: N is NOT a power of 2" ) // required for this implemtation
   Predef.assert( n/p <= d, "Error: A PE can NOT compute partial WHT" )
 
   // Dictionaries per PE, Hadamard Blocks and PEs per Hadamard
@@ -111,6 +111,11 @@ class ARRAYfht( val bitWidth : Int, val fracWidth : Int,
     array(ix).io.yin := array(ix-1).io.yout
   }
 
+  // connect sum
+  array(0).io.sin := array(h-1).io.sout
+  for( ix <- 1 until h ){
+    array(ix).io.sin := array(ix-1).io.sout
+  }
 
   // control signals
   array(0).io.ctrl := RegNext( RegNext( fsm.io.ctrl ) )
@@ -118,12 +123,10 @@ class ARRAYfht( val bitWidth : Int, val fracWidth : Int,
     array( ix ).io.ctrl := array( ix-1 ).io.ctrlOut 
   }
 
-  //io.inData.ready := inFifo.io.enq.ready
-  //io.outData.bits := array(0).io.sout //array(0).io.hout + array(1).io.hout
-  //io.outData.valid := fsm.io.yrdy
+  io.inData.ready := inFifo.io.enq.ready
+  io.outData.bits := array(0).io.sout //array(0).io.hout + array(1).io.hout
+  io.outData.valid := fsm.io.yrdy
 
-  // dummy tester
-  io.outData.bits := RegNext( array(0).io.sout ) //+ RegNext( array(31).io.sout )
 
 
 }

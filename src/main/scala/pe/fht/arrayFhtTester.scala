@@ -44,11 +44,11 @@ class arrayFhtSim( c: ARRAYfht ) extends Tester( c ){
   for( ix <- 0 until 4 ){
     poke( c.io.inData.bits(1), toFixed( ydat(ix), fracWidth ) )
     for( iy <- 0 until d ){
-      poke(c.io.inData.bits(0), toFixed( rng.nextFloat, fracWidth ) ) //basic(iy), xdat(ix)(iy)
+      poke(c.io.inData.bits(0), toFixed( basic(iy), fracWidth ) ) //basic(iy), rng.nextFloat, xdat(ix)(iy)
       step(1)
     }
   }
-  step(450)
+  step(900)
 
   /*
   for( ix <- 0 until d*2 ){
@@ -112,13 +112,13 @@ object arrayFhtTester{
   val fracWidth = 10
 
   val sigma = 11.47
-  val n = 32 //128 //64 //32 //16  //16
-  val p = 4 //16 //8  //4   //2
-  val d = 32 //128 //64 //32
+  val n = 384 //128 //32 //128 //32 //128 //64 //32 //16  //16
+  val p = 12 //4 //16 //8  //4   //2
+  val d = 128 //32 //128 //32 //128 //64 //32
 
 
   // alu stages
-  val aStages = 0
+  val aStages = 3
 
   // get n-length parameter vectors
   val (gvec, svec, avec) = helper.fit( n, d, sigma )
@@ -165,10 +165,10 @@ object arrayFhtVerilog{
   val sigma = 11.47
   val n = 4096 //1024 //128
   val p = 128 //16
-  val d = 256 //128 //32
+  val d = 512 //256 //128 //32
 
   // alu stages
-  val aStages = 0
+  val aStages = 3
 
   // get n-length parameter vectors
   val (gvec, svec, avec) = helper.fit( n, d, sigma )

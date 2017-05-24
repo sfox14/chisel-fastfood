@@ -40,13 +40,11 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   val io = new Bundle{
     val xin = Fixed(INPUT, bitWidth, fracWidth)
     val hin = Vec.fill( log2Up( p*d/n ) ){ Fixed(INPUT, bitWidth, fracWidth) }
-    val sin = Fixed(INPUT, bitWidth, fracWidth)
-    val yin = Fixed(INPUT, bitWidth, fracWidth)
+    val delta = Fixed(INPUT, bitWidth, fracWidth)
     
     val xout = Fixed(OUTPUT, bitWidth, fracWidth)
     val hout = Fixed(OUTPUT, bitWidth, fracWidth)
     val sout = Fixed(OUTPUT, bitWidth, fracWidth)
-    val yout = Fixed(OUTPUT, bitWidth, fracWidth)
 
     val ctrl = new CtrlPE().flip()
 
@@ -82,8 +80,13 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   val h = n/d
   val b = p/h
 
-  val mStages = 1 //4 //4
+  val mStages = 4 //4 //4
   val eStages = 3 // extra = dat_out + op1/op2 + other pipeline registers
+
+   // Cosine table parameters
+  val intWidth = (bitWidth - fracWidth)
+  val lutWidth = log2Up( 512 ) // 2**(lutWidth) = lutSize entries
+  val lutFracWidth = lutWidth - 1 // only one bit for integer (mod 2)
   
   Predef.assert( ( k/2 ) >= aStages + mStages + eStages, "Error: Maximum switch, k/2, greater than the number of pipeline stages in datapath" )
 
@@ -97,6 +100,8 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
 
   // application registers
   val dat_out = RegInit( Fixed(0, bitWidth, fracWidth) )
+  val sum_local = RegInit( Fixed(0, bitWidth, fracWidth ) )
+
 
   // PE memory
   val preg = ShiftRegister( dat_out, k - aStages - eStages )
@@ -112,18 +117,19 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   hin := Mux( hSel, io.hin(sx), dat_out ) //, //*note: changes in sx should be aligned with dat_out
 
 
+  val cosine = cosTable( 1.0, 0, 512 )
   val kern = (0 until k).map( x => BigInt(0) ).toVector
   val extra = (0 until 2*k).map( x => BigInt(0) ).toVector
   val had = (0 until 2*k).map( x => BigInt(0) ).toVector
   var ram = had ++ g ++ s ++ alpha ++ kern
   //val ram = (0 until 8*k).map( x => BigInt(0) )
-  val dataMem = Module( new DualPortBRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
-                                          log2Up(8*k), id, ram, forSim ) )
+  /*val dataMem = Module( new DualPortBRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
+                                          log2Up(8*k), id, ram, forSim ) )*/
 
-  /*
+  ///*
   val dataMem = Module( new PipelinedDualPortBRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
                                           log2Up(8*k), 1, 2, id, ram, forSim ) )
-  */
+  //*/
 
   // PE data counter
   val counter = RegInit( UInt(0, log2Up(k)) )
@@ -141,7 +147,10 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   // write enable
   val write = ShiftRegister( (  opCode === UInt(8, 4) || 
                                 opCode === UInt(0, 4) ||
-                                opCode === UInt(1, 4)    
+                                opCode === UInt(1, 4) ||
+                                opCode === UInt(2, 4) ||
+                                opCode === UInt(5, 4) ||
+                                opCode === UInt(12, 4)  
                               ), eStages-1 + aStages )
 
 
@@ -162,7 +171,7 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   val op_bx = RegInit( Fixed(0, bitWidth, fracWidth) ) //Fixed( width=bitWidth, fracWidth=fracWidth )
   op_bx := x_data
   when( !index ){
-    op_bx := -x_data
+    op_bx := x_data //-x_data ***************************************************
   }
 
   // sign of preg operand
@@ -179,17 +188,27 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
   psign := Mux( pSel, preg, -preg )
 
   val op1 = RegInit( Fixed(0, bitWidth, fracWidth) )
-  op1 := MuxCase( Fixed(0, bitWidth, fracWidth), Array( 
+  op1 := MuxCase( psign, Array( 
         ( opCode === UInt(8) ) -> op_bx,
-        ( opCode === UInt(0) || opCode === UInt(1) ) -> psign
+        ( opCode === UInt(13) ) -> io.delta,
+        ( opCode === UInt(15) ||
+          opCode === UInt(14) ||
+          opCode === UInt(7) ||
+          opCode === UInt(6) ||
+          opCode === UInt(9) ) -> Fixed(0, bitWidth, fracWidth)
                 ))
 
 
 
   // select operand 2
   val op2 = RegInit( Fixed(0, bitWidth, fracWidth) )
-  op2 := MuxCase( Fixed(0, bitWidth, fracWidth), Array(
-        ( opCode === UInt(0) || opCode === UInt(1) ) -> RegNext( hreg ) //match extra pipeline stage 
+  op2 := MuxCase( RegNext( hreg ), Array(                //RegNext - match extra pipeline stage
+        ( opCode === UInt(15) ||
+          opCode === UInt(14) ||
+          opCode === UInt(7) ||
+          opCode === UInt(6) ||
+          opCode === UInt(9) ||
+          opCode === UInt(5) ) -> Fixed(0, bitWidth, fracWidth)  
                 ))
   
 
@@ -202,18 +221,55 @@ class PEfht( val id : Int, val bitWidth : Int, val fracWidth : Int,
     out
   }
 
+  def convToFixed( a : UInt ) : Fixed = {
+    val b = (a>>fracWidth)
+    val fixedType = Fixed(width=bitWidth, fracWidth=fracWidth)
+    fixedType.fromBits( (0 until bitWidth).reverse.map( x => b(x) ).reduce(_##_) )
+  }
+
+  // 2. Pipelined DSP multiply
+  def dspMultiply( op1 : Fixed, op2 : Fixed, regIn : Int, regOut : Int): Fixed = {
+    val a = ShiftRegister( op1.toSInt, regIn )
+    val b = ShiftRegister( op2.toSInt, regIn )
+    val out = ShiftRegister( a * b, aStages - regIn ).toUInt
+    convToFixed( out )
+  }
+
+  def cosFunc( op1 : Fixed ): Fixed = {
+    val cosFixed = Vec( cosine.map( x => Fixed(x, bitWidth, fracWidth) ) ) // ROM
+    val idx = op1( (bitWidth - intWidth) , (fracWidth - lutFracWidth) )
+    val a = ShiftRegister( idx, 1)
+    val out = ShiftRegister( cosFixed(a), aStages - 1 )
+    //out
+    ShiftRegister( op1+op1, 3) //************************************************
+  }
+
   val alu_out = Fixed(width=bitWidth, fracWidth=fracWidth)
   alu_out := MuxCase( Fixed(0, bitWidth, fracWidth), Array(
-        ( aluCode === UInt(8) ) -> op1, //ShiftRegister(op1, aStages),
-        ( aluCode === UInt(0) || aluCode === UInt(1) ) -> (op1 + op2) //adderStage( op1, op2 ) 
+        ( aluCode === UInt(8) ) -> ShiftRegister(op1, aStages), // op1, //
+        ( aluCode === UInt(0) || 
+          aluCode === UInt(1) ||
+          aluCode === UInt(12 )) -> adderStage( op1, op2 ), //(op1 + op2), //
+        ( aluCode === UInt(2) || 
+          aluCode === UInt(3) ||
+          aluCode === UInt(4) ||
+          aluCode === UInt(13) ) -> dspMultiply( op1, op2, 1, 2 ),
+        ( aluCode === UInt(5) ) -> cosFunc( op1 )  
                     ))
 
   dat_out := alu_out
 
+  val sumCode = RegNext( aluCode )
+  sum_local := Mux( (sumCode === UInt(4)), (sum_local + dat_out), Fixed(0, bitWidth, fracWidth) )
+
+  /*
+  when( sumCode === UInt(6) ){
+    sum_global := sum_local
+  }*/
 
   io.xout := x_parr
-  io.yout := dat_out
   io.hout := dat_out
+  io.sout := sum_local //(sReg + sum_global)
   
 }
 
@@ -285,6 +341,7 @@ class AddrGen( k : Int ) extends Module{
   }
   when( end ){
     lvl := UInt(1)
+    toggle := UInt(0)
   }
 
   // address from hadamard
@@ -308,11 +365,15 @@ class AddrGen( k : Int ) extends Module{
   val wToggle = RegNext(!toggle)
   val wHadGen = RegNext( io.counter )
   val wDefault = RegNext( rdAddr )
-  val wSel = RegNext( (io.func === UInt(1,4)) )
+  val wSel1 = RegNext( (io.func === UInt(1,4)) )
+  val wSel2 = RegNext( (io.func === UInt(2,4)) ) // write to addr 0
 
   val wHad = ( UInt(0, 2) ## wToggle ## wHadGen )
   val wrAddr = UInt(width=log2Up(k)+3)
-  wrAddr := Mux( wSel, wHad, wDefault )
+  wrAddr := MuxCase( wDefault, Array( 
+                ( wSel1 ) -> wHad, 
+                ( wSel2 ) -> ( UInt(0, 3) ## wHadGen ) 
+                    ))
 
 
   // delay = (from func -> dat_out) = mStages + aStages + eStages
