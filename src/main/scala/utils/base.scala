@@ -6,6 +6,11 @@ import scala.util.Random
 
 import xilinx._
 
+/*
+Miscellaneous functions for parallel/streaming fastfood
+*/
+
+// 2-input, 3-input and 4-input adder tree. Uses binary and ternary adders
 object adderType
 {
   def triAdd3( a : Vector[Fixed] ): Fixed = {
@@ -57,7 +62,6 @@ object stream
       .map(x => Mux( sel(x)(1), 
                   Mux( sel(x)(0), dIn.bits(x), -dIn.bits(x) ),
                     zero ) ).toVector
-
   }
 
 }

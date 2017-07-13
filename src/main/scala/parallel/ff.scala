@@ -9,13 +9,16 @@ import scala.util.Random
 import utils._
 
 import math._
+
 /*
-Fastfood Implementation
+Fastfood Implementation (without FWHT)
 -----------------------
   - Forward path only
   - Computes the inference/prediction step
   - simple and fully parallel architecture
+  - Computes Hadamard transform in O(nd) time
 */
+
 class FF( val n_dicts : Int, val n_features : Int, val n_paths : Int, 
   val bitWidth : Int, val fracWidth : Int, val ram : List[List[Int]],
   val g : List[BigInt], val s : List[BigInt], val u : List[Double],
