@@ -1,0 +1,13 @@
+Linear:
+	- experimental implementation of Fastfood
+	- linear array of processing elements
+	- overlapping datapaths
+	- computes the hadamard transform in O(nd) time
+	- sequence of computation: bhp => g => h => s => cos ...
+
+hierarchical:
+	- full version of Fastfood
+	- linear array of processing blocks
+	- each block consists of an array of processing elements
+	- Hadamard transform computed via FWHT in O(nlogd) time in each block
+	- prediction and training
