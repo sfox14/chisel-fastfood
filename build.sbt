@@ -13,11 +13,14 @@ lazy val rpSettings = Seq(
   scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-language:reflectiveCalls"),
   resolvers += "typesafe" at "http://repo.typesafe.com/typesafe/releases/",
   parallelExecution in Test := false,
-  // libraryDependencies ++= ( if (chiselVersion != "None" ) ("edu.berkeley.cs" %% "chisel" % chiselVersion) :: Nil; else Nil),
+  //libraryDependencies ++= ( if (chiselVersion != "None" ) ("edu.berkeley.cs" %% "chisel" % chiselVersion) :: Nil; else Nil),
   libraryDependencies += "com.github.tototoshi" %% "scala-csv" % "1.3.4",
   libraryDependencies += "com.novocode" % "junit-interface" % "0.10" % "test",
   libraryDependencies += "org.scalatest" %% "scalatest" % "2.2.4" % "test",
-  libraryDependencies += "org.scala-lang" % "scala-compiler" % "2.11.7"
+  libraryDependencies += "org.scala-lang" % "scala-compiler" % "2.11.7",
+  
+  libraryDependencies += "org.scalanlp" %% "breeze" % "0.13.1",
+  resolvers += "Sonatype Releases" at "https://oss.sonatype.org/content/repositories/releases/"
 )
 
 lazy val chisel = RootProject(uri("git://github.com/da-steve101/chisel.git"))

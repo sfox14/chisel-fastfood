@@ -94,7 +94,7 @@ class DualPortBRAM[T <: Fixed](gen : T, addrBits: Int, id : Int,
   // for simulation, otherwise the verilog instantiation will have a reset.
   if( forSim ){
     val fixedType = gen.cloneType 
-    val ram = Vec( init.map((i : BigInt) => fixedType.fromInt(i.toInt) ) )
+    val ram = Vec( init.map((i : BigInt) => Fixed(i, fixedType.getWidth, fixedType.fractionalWidth) ) )
     val mem = RegInit( ram )
 
     for (i <- 0 until 2) {

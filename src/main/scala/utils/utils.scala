@@ -173,6 +173,15 @@ class FastFoodTest( var n_dicts : Int, var n_features : Int,
     
   }
 
+  def U(): List[List[Double]] = {
+    try{
+        openCSV( ".tmp/U.csv" ).map(x => x.map(y => y.trim.toDouble ) )
+      } catch{
+          case x:Exception => throw new Exception("Error: .tmp/U.csv")
+      }
+    
+  }
+
   def B(): List[List[Int]] = {
     try{
         openCSV( ".tmp/B.csv" ).map(x => x.map(y => ((y.toDouble+1)/2.0).toInt ) )
@@ -235,6 +244,12 @@ class FastFoodTest( var n_dicts : Int, var n_features : Int,
       }
   }
 
-}
+  def ALPHA(): List[List[Double]] = {
+    try{
+        openCSV( ".tmp/ALPHA.csv" ).map( x => x.map(y => y.trim.toDouble) )
+      } catch{
+          case x:Exception => throw new Exception("Error: .tmp/ALPHA.csv")
+      }
+  }
 
-// Maybe I should decouple the import matrices and conversion to LUT RAM format
+}
