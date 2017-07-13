@@ -3,26 +3,30 @@ package utils
 import Chisel._
 import java.io._
 import math._
-// A module for inferring true dual-pPort BRAMs on FPGAs
-// Taken from git://github.com/maltanar/fpga-tidbits.git and edited for any Fixed type
 
+/*
+*   A module for inferring true dual-Port BRAMs on FPGAs
+*     - Taken from git://github.com/maltanar/fpga-tidbits.git
+*     - Adapted for Fixed type only
+*     - Writes .mem initialisation file
+*/
 
-class OCMRequest[T <: Data](gen : T, addrWidth: Int) extends Bundle {
+class OCMRequest[T <: Fixed](gen : T, addrWidth: Int) extends Bundle {
   val addr = UInt(width = addrWidth)
-  val writeData = gen.cloneType //UInt(width = writeWidth)
+  val writeData = gen.cloneType 
   val writeEn = Bool()
 
   override def clone = {new OCMRequest(gen.cloneType, addrWidth).asInstanceOf[this.type]}
 
 }
-class OCMResponse[T <: Data](gen : T) extends Bundle {
+class OCMResponse[T <: Fixed](gen : T) extends Bundle {
   val readData = gen.cloneType //UInt(width = readWidth)
 
   override def clone = {new OCMResponse( gen.cloneType ).asInstanceOf[this.type]}
 
 }
 // slave interface is just the master interface flipped
-class OCMSlaveIF[T <: Data](gen : T, addrWidth: Int) extends Bundle {
+class OCMSlaveIF[T <: Fixed](gen : T, addrWidth: Int) extends Bundle {
   val req = new OCMRequest(gen, addrWidth).asInput()
   val rsp = new OCMResponse(gen).asOutput()
 }
@@ -32,7 +36,7 @@ class OCMSlaveIF[T <: Data](gen : T, addrWidth: Int) extends Bundle {
 // Chisel-generated Verilog (both ports in the same "always" block),
 // we use a BlackBox with a premade Verilog BRAM template.
 
-class DualPortBRAMIO[T <: Data](gen : T, addrBits: Int) extends Bundle {
+class DualPortBRAMIO[T <: Fixed](gen : T, addrBits: Int) extends Bundle {
   val ports = Vec.fill (2) {new OCMSlaveIF(gen, addrBits)}
 
   ports(0).req.addr.setName("a_addr")
@@ -47,7 +51,7 @@ class DualPortBRAMIO[T <: Data](gen : T, addrBits: Int) extends Bundle {
 }
 
 // For higher fmax
-class PipelinedDualPortBRAM[T <: Data](gen : T, addrBits: Int,
+class PipelinedDualPortBRAM[T <: Fixed](gen : T, addrBits: Int,
   regIn: Int,    // number of registers at input
   regOut: Int,   // number of registers at output
   id : Int, init : Seq[BigInt], forSim : Boolean = true
@@ -65,7 +69,7 @@ class PipelinedDualPortBRAM[T <: Data](gen : T, addrBits: Int,
   io.ports(1).rsp := ShiftRegister(bram.ports(1).rsp, regOut)
 }
 
-class DualPortBRAM[T <: Data](gen : T, addrBits: Int, id : Int,  
+class DualPortBRAM[T <: Fixed](gen : T, addrBits: Int, id : Int,  
     init : Seq[BigInt], forSim : Boolean = true ) extends BlackBox {
   val io = new DualPortBRAMIO(gen, addrBits)
   setVerilogParameters(new VerilogParameters {
@@ -78,20 +82,19 @@ class DualPortBRAM[T <: Data](gen : T, addrBits: Int, id : Int,
   addClock( Driver.implicitClock )
 
   // simulation model for TDP BRAM
-  //val mem = Mem(gen.cloneType, 1 << addrBits)
   println( log2Up( init.length ), addrBits )
   Predef.assert( log2Up( init.length ) == addrBits, s"Error: Missing BRAM init values" )
 
   //Write init data to a file
   if( !forSim ){
-    toFile(id, init)
+    toFile(id, init, gen.getWidth)
   }
 
   // Chisel Mem does not accept an initialisation. Instead use Vec(RegInit) but only 
   // for simulation, otherwise the verilog instantiation will have a reset.
   if( forSim ){
-    //println("simulating...")
-    val ram = Vec( init.map((i : BigInt) => Fixed(i, 18, 10) ) )
+    val fixedType = gen.cloneType 
+    val ram = Vec( init.map((i : BigInt) => fixedType.fromInt(i.toInt) ) )
     val mem = RegInit( ram )
 
     for (i <- 0 until 2) {
@@ -105,7 +108,6 @@ class DualPortBRAM[T <: Data](gen : T, addrBits: Int, id : Int,
       }
     }
   }
-
 }
 
 /*
@@ -113,38 +115,38 @@ Save contents of BRAM to file, and ensure the formatting supports XST
 */
 object toFile{
 
-  def apply( id : Int, data : Seq[BigInt] ){
+  def apply( id : Int, data : Seq[BigInt], bitWidth : Int ){
 
     val file = s".temp_mem/pe_$id.mem"
     val writer = new BufferedWriter( new OutputStreamWriter( new FileOutputStream(file) ) )
-    for( x <- format(data) ){
+    for( x <- format(data, bitWidth) ){
       writer.write( x + "\n")
     }
     writer.close()
   }
 
-  def format( data : Seq[BigInt] ) : Seq[String] = {
+  def format( data : Seq[BigInt], bitWidth : Int ) : Seq[String] = {
     // 18-bits, signed
-    var bw = 18
+    var bw = bitWidth
 
     var zeros = List.fill(bw)("0").mkString("") //"000000000000000000" //18 zeros
     var combinedBits = ""
     for( x <- data ){
       var hexString = ( Literal(x, bw, true)  // Chisel literal
-        .toString           // toString
-        .substring(2)       // drop "0x"
-        .reverse ++ "000000000" ) // reverse and add zeros
-        .substring(0, ceil(bw/4).toInt )     // only want ceil(18/4) bits
-        .reverse            // reverse back
+        .toString                             // toString
+        .substring(2)                         // drop "0x"
+        .reverse ++ "000000000" )             // reverse and add zeros
+        .substring(0, ceil(bw/4).toInt )      // only want ceil(18/4) bits
+        .reverse                              // reverse back
 
       var bitString = ( BigInt( hexString, 16 ).toString(2)
-                        .reverse ++ zeros ) //to make sure we get 18-bits
+                        .reverse ++ zeros )   //to make sure we get 18-bits
                         .substring(0, bw)
                         .reverse
       combinedBits = combinedBits ++ bitString
     }
 
-    //Predef.assert( combinedBits.length <= 18000, "Error: MEM too big for one BRAM")
+    //Predef.assert( combinedBits.length <= 18432, "Error: MEM too big for 18Kb BRAM")
 
     // byte alignment
     (combinedBits map(_.asDigit) ) // big bit string to vector
