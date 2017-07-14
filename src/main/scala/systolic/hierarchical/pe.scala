@@ -29,6 +29,44 @@ object ShiftRegisterEnable{
   }
 }
 
+class BramSreg[T <: Fixed](gen : T, n : Int, a : Int, forSim : Boolean) extends Module{
+	/*
+	n = length of sreg
+	a = mStages + aStages + eStages
+	*/
+
+	val fixedType = gen.cloneType
+	val io = new Bundle{
+		val in = Fixed( INPUT, fixedType.getWidth, fixedType.fractionalWidth )
+		val out = Fixed( OUTPUT, fixedType.getWidth, fixedType.fractionalWidth ) 
+	}
+
+	val mem = (0 until pow(2, log2Up(n+1)).toInt ).map( x => BigInt(0) ).toVector
+	val sreg = Module( new PipelinedDualPortBRAM( fixedType,
+                                log2Up(n+1), 1, 2, 2000, mem, forSim ) )
+
+	val rAddr = RegInit( UInt(0, log2Up(n+1)) )
+	rAddr := rAddr + UInt(1)
+	when( rAddr === UInt(n, log2Up(n+1)) ){
+		rAddr := UInt(0)
+	}
+	val wAddr = ShiftRegister(rAddr, a)
+
+	// port0 - read
+	sreg.io.ports(0).req.addr := rAddr
+	io.out := sreg.io.ports(0).rsp.readData
+
+	// port 1 - write
+	sreg.io.ports(1).req.addr := wAddr 
+	sreg.io.ports(1).req.writeData := io.in
+	sreg.io.ports(1).req.writeEn := Bool(true)
+
+
+}
+
+
+
+
 
 // PE version with Fast Hadamard Transform
 
@@ -98,8 +136,12 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
 
 
   // PE memory
-  val porig = ShiftRegister( dat_out, k - aStages - eStages - 1 - 3)
-  val preg = ShiftRegister( porig, 3 )
+  //val porig = ShiftRegister( dat_out, k - aStages - eStages - 1 - 3)
+  val porig = Module( new BramSreg( Fixed(width=bitWidth, fracWidth=fracWidth), 
+  							k - aStages - eStages - 3,
+  							aStages + eStages, forSim) )
+  porig.io.in := dat_out
+  val preg = ShiftRegister( porig.io.out, 3 )
   val pplus = RegNext( preg )
   val pminus = RegNext( -preg )
 
@@ -147,7 +189,7 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
   val agen = Module( new AddrGen( k, bitWidth, fracWidth ) )
   agen.io.counter := counterA
   agen.io.func := func
-  agen.io.porig := porig
+  agen.io.porig := porig.io.out
   val rdAddr = agen.io.rdAddr
   val wrAddr = ShiftRegister( agen.io.wrAddr, mStages + aStages + eStages - 1 ) // delay, -1, pipeline stage in AddrGen
 
