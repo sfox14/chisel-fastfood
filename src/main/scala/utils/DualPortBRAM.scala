@@ -86,9 +86,9 @@ class DualPortBRAM[T <: Fixed](gen : T, addrBits: Int, id : Int,
   Predef.assert( log2Up( init.length ) == addrBits, s"Error: Missing BRAM init values" )
 
   //Write init data to a file
-  if( !forSim ){
-    toFile(id, init, gen.getWidth)
-  }
+  //if( !forSim ){
+  //  toFile(id, init, gen.getWidth)
+  //}
 
   // Chisel Mem does not accept an initialisation. Instead use Vec(RegInit) but only 
   // for simulation, otherwise the verilog instantiation will have a reset.

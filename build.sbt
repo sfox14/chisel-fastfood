@@ -23,7 +23,7 @@ lazy val rpSettings = Seq(
   resolvers += "Sonatype Releases" at "https://oss.sonatype.org/content/repositories/releases/"
 )
 
-lazy val chisel = RootProject(uri("git://github.com/da-steve101/chisel.git"))
+lazy val chisel = RootProject(uri("git://github.com/sfox14/chisel.git"))
 
 lazy val fastfood = (project in file(".")).settings(rpSettings: _*).dependsOn(chisel)
 
