@@ -11,3 +11,8 @@ hierarchical:
 	- each block consists of an array of processing elements
 	- Hadamard transform computed via FWHT in O(nlogd) time in each block
 	- prediction and training
+
+
+practise:
+	- dummy processing elements and dummy linear array
+	- used as a dummy circuit

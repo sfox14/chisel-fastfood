@@ -1,4 +1,4 @@
-package hierarchical
+package practise
 
 import Chisel._
 import com.github.tototoshi.csv._
@@ -12,7 +12,82 @@ import xilinx._
 import math._
 
 
-object ShiftRegisterEnable{
+class MulModIO(bitWidth : Int, fracWidth : Int) extends Bundle{
+  val op1 = Fixed(INPUT, bitWidth, fracWidth)
+  val op2 = Fixed(INPUT, bitWidth, fracWidth)
+  val res = Fixed(OUTPUT, bitWidth, fracWidth)
+
+  def setNames(){
+    op1.setName( "A" )
+    op2.setName( "B" )
+    res.setName( "P" )
+  }
+}
+
+class MulModBB(bitWidth : Int, fracWidth : Int) extends BlackBox{
+  val io = new MulModIO(bitWidth, fracWidth)
+  io.setNames()
+
+  addClock( Driver.implicitClock )
+  renameClock( Driver.implicitClock, "CLK" )
+  setModuleName("mult_gen_0")
+
+  //simulate
+  io.res := (io.op1 * io.op2)
+
+}
+
+class MulMod( bitWidth : Int, fracWidth : Int, nreg : Int) extends Module {
+  val io = new MulModIO(bitWidth, fracWidth)
+
+  val mul = Module( new MulModBB( bitWidth, fracWidth ) )
+
+  mul.io.op1 := ShiftRegister( io.op1, nreg )
+  mul.io.op2 := ShiftRegister( io.op2, nreg )
+  io.res := ShiftRegister( mul.io.res, nreg ) 
+
+}
+
+
+class CtrlPE extends Bundle {
+  // PE control signals
+  val pload = Bool(OUTPUT)
+  val yload = Bool(OUTPUT)
+  val padd = Bool(OUTPUT)
+  val func = UInt(OUTPUT, 4)
+  val sx = UInt(OUTPUT, 3)
+
+}
+
+class CtrlIO extends Bundle{
+
+  val pe = new CtrlPE
+
+  override def clone = { new CtrlIO().asInstanceOf[this.type] }
+
+}
+
+class LFSR( val init : Int ) extends Module {
+  val io = new Bundle{
+    val en = Bool(INPUT)
+    val out = Bool(OUTPUT)
+  }
+  val res = RegInit( UInt(init, 16) )
+  val nxt_res = Cat( res(0)^res(2)^res(3)^res(5), res(15,1) )
+  when( io.en ){
+    res := nxt_res
+  }
+  // reset
+  when( !io.en ){
+    res := UInt( init, 16 )
+  }
+
+  // 1-bit output
+  io.out := res(0)
+
+}
+
+object ShiftRegisterEnable {
   /** @param in input to delay
     * @param n number of cycles to delay
     * @param en enable the shift */
@@ -29,99 +104,62 @@ object ShiftRegisterEnable{
   }
 }
 
-class BramSreg[T <: Fixed](gen : T, n : Int, a : Int, forSim : Boolean) extends Module{
-	/*
-	n = length of sreg
-	a = aStages + eStages
-	*/
-
-	val fixedType = gen.cloneType
-	val io = new Bundle{
-		val in = Fixed( INPUT, fixedType.getWidth, fixedType.fractionalWidth )
-		val out = Fixed( OUTPUT, fixedType.getWidth, fixedType.fractionalWidth ) 
-	}
-
-	val mem = (0 until pow(2, log2Up(n+1)).toInt ).map( x => BigInt(0) ).toVector
-	val sreg = Module( new PipelinedDualPortBRAM( fixedType,
-                                log2Up(n+1), 1, 2, 2000, mem, forSim ) )
-
-	val rAddr = RegInit( UInt(0, log2Up(n+1)) )
-	rAddr := rAddr + UInt(1)
-	when( rAddr === UInt(n, log2Up(n+1)) ){
-		rAddr := UInt(0)
-	}
-	val wAddr = ShiftRegister(rAddr, a)
-
-	// port0 - read
-	sreg.io.ports(0).req.addr := rAddr
-	io.out := sreg.io.ports(0).rsp.readData
-
-	// port 1 - write
-	sreg.io.ports(1).req.addr := wAddr 
-	sreg.io.ports(1).req.writeData := io.in
-	sreg.io.ports(1).req.writeEn := Bool(true)
-
-
-}
-
-
-
-
-
 // PE version with Fast Hadamard Transform
-class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
-    val n : Int, val p : Int, val d : Int, g : Seq[BigInt], s : Seq[BigInt], 
-      alpha : Seq[BigInt], val aStages : Int, forSim : Boolean = true, 
-        seed : Int = 45687 ) extends Module{
+
+class DummyPE( val id : Int, val bitWidth : Int, val fracWidth : Int,
+    val n : Int, val p : Int, val d : Int, forSim : Boolean = true, 
+        seed : Int = 45687 ) extends Module {
   
   val io = new Bundle{
     val xin = Fixed(INPUT, bitWidth, fracWidth)
-    val hin = Vec.fill( log2Up( p*d/n ) ){ Fixed(INPUT, bitWidth, fracWidth) }
-    val delta = Fixed(INPUT, bitWidth, fracWidth)
-    
     val xout = Fixed(OUTPUT, bitWidth, fracWidth)
+    
+    val hin = Fixed(INPUT, bitWidth, fracWidth)
     val hout = Fixed(OUTPUT, bitWidth, fracWidth)
-    val sout = Fixed(OUTPUT, bitWidth, fracWidth)
 
+    val kin = Fixed(INPUT, bitWidth, fracWidth)
+    
     val ctrl = new CtrlPE().flip()
+    val ctrlOut = new CtrlPE()
+
+  }
 
   /*
   k = n/p  // Dictionary per PE
   h = n/d  // Hadamard blocks
   b = p/h  // PEs per Hadamard
   */
+  val k = n/p
+  val h = n/d
+  val b = p/h
 
-  // 512 x bitWidth ROMs for Cosine LUT
-  def cosTable(A : Double, b: Double, n : Int = 512) = {
+  val aStages = 2
+  val mStages = 1//3
+  val eStages = 1//3
 
-    val tab = (0 until n).map(x => x/(1<<(log2Up(n)-1) ).toDouble )
-              .map(y => A*cos(y*Pi + b) )
-    val fixedTab = tab.map( x => toFixed(x, fracWidth) ).toVector
-    fixedTab
-  }
 
+  //  **** INPUT *** //
   // local pipeline register for ctrl signals
   val pload = Reg( init=Bool(false), next=io.ctrl.pload )
   val padd = Reg( init=Bool(false), next=io.ctrl.padd )
   val func = Reg( init=UInt(0, 4), next=io.ctrl.func )
   val sx = Reg( init=UInt(0, 3), next=io.ctrl.sx )
-
-
-  val k = n/p
-  val h = n/d
-  val b = p/h
-
-  val mStages = 4
-  val eStages = 3
-
-  
-  Predef.assert( ( k/2 ) >= aStages + mStages + eStages, "Error: Maximum switch, k/2, greater than the number of pipeline stages in datapath" )
-
-  // input load
+  // input x
   val x_parr = Reg( init=Fixed(0, bitWidth, fracWidth), next=io.xin )
+  // input hin
+  val h_parr = Reg( init=Fixed(0, bitWidth, fracWidth), next=io.hin )
+  // input kin
+  val kin = Reg( init=Fixed(0, bitWidth, fracWidth), next=io.kin )
+
+
+  // Input Load + Parallel Input Buffer
   val x_data = ShiftRegisterEnable( x_parr, k-1, en=pload )
   val x_data2 = RegEnable( x_data, pload )
   val x_data3 = RegEnable( -x_data, pload )
+
+
+  val delta = RegInit( Fixed(212, bitWidth, fracWidth) )
+  
 
   // func shift registers
   val opCode = ShiftRegister( func, mStages + 1 )
@@ -129,50 +167,28 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
 
   // application registers
   val dat_out = RegInit( Fixed(0, bitWidth, fracWidth) )
-  val sum_local = RegInit( Fixed(0, bitWidth, fracWidth ) )
-
 
   // PE memory
-  //val porig = ShiftRegister( dat_out, k - aStages - eStages - 1 - 3)
-  val porig = Module( new BramSreg( Fixed(width=bitWidth, fracWidth=fracWidth), 
-  							max(k - aStages - eStages - 3, 1),
-  							aStages + eStages, forSim) )
-  porig.io.in := dat_out
-  val preg = ShiftRegister( porig.io.out, 3 ) // porig.io.out
+  val porig = ShiftRegister( dat_out, k - aStages - eStages - 1) //-3) 
+  val preg = RegNext( porig )
   val pplus = RegNext( preg )
   val pminus = RegNext( -preg )
 
 
-  val hin = RegInit( Fixed( 0, bitWidth, fracWidth) ) // ****maybe no reg here
+  val hin = RegInit( Fixed(0, width=bitWidth, fracWidth=fracWidth) )
   val hSel = Bool()
-  hSel := ( sx <= UInt(log2Up(b)-1, 4) )
-  hin := Mux( hSel, io.hin(sx), dat_out )
+  hSel := ( sx <= UInt(log2Up(b)-1, 3) )
+  hin := Mux( hSel, h_parr, dat_out )
+  /*hin := MuxCase( dat_out, Array( 
+          ( hSel === UInt(1) ) -> h_parr,
+          ( hSel === UInt(2) ) -> kin
+                ))
+  */
 
-  val rng9 = new Random(11)
-  var amp = sqrt(2.0/n)
-  var u = rng9.nextDouble()*2*Pi
-  val cosine = cosTable( amp, u, 256 )
-  val kern = (0 until k).map( x => BigInt(0) ).toVector
-  val extra = (0 until 2*k).map( x => BigInt(0) ).toVector
-  val extra256 = (0 until k).map( x => BigInt(0) ).toVector
-  val had = (0 until 2*k).map( x => BigInt(0) ).toVector
+  val ram = (0 until 8*k).map( x => BigInt(0) ).toVector
+  val dataMem = Module( new PipelinedDualPortLutRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
+                                        log2Up(8*k), 1, 1, id, ram, forSim ) )
 
-  var ram32 = had ++ g ++ s ++ alpha ++ kern ++ extra ++ cosine ++ extra
-  var ram64 = had ++ g ++ s ++ alpha ++ kern ++ extra ++ cosine
-  var ram128 = had ++ g ++ s ++ alpha ++ kern ++ cosine
-  var ram256 = had ++ g ++ s ++ alpha ++ kern ++ cosine ++ extra256
-
-  var mem = ram32
-  var aw = 10
-  if( k==64 ){ mem = ram64 }
-  else if( k==128 ){ mem = ram128 }
-  else if( k==256 ){ 
-    mem = ram256 
-    aw = 11
-  }
-
-  val dataMem = Module( new PipelinedDualPortBRAM( Fixed(width=bitWidth, fracWidth=fracWidth),
-                                        aw, 1, 2, id, mem, forSim ) ) 
 
   // PE data counter
   val counter = RegInit( UInt(0, log2Up(k)) )
@@ -186,7 +202,7 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
   val agen = Module( new AddrGen( k, bitWidth, fracWidth ) )
   agen.io.counter := counterA
   agen.io.func := func
-  agen.io.porig := porig.io.out
+  agen.io.porig := porig
   val rdAddr = agen.io.rdAddr
   val wrAddr = ShiftRegister( agen.io.wrAddr, mStages + aStages + eStages - 1 ) // delay, -1, pipeline stage in AddrGen
 
@@ -209,9 +225,6 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
   dataMem.io.ports(1).req.writeData := hin
   dataMem.io.ports(1).req.writeEn := write
 
-
-  //var pid = id
-  //var sd = (35605*(( ((b*hid) + pid) )/p)).toInt
 
   // operand for bx, random samples from LFSR
   val randb = Module( new LFSR( 45687 ) ) // 45687 ) )  // 
@@ -238,25 +251,17 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
 
   val op1 = RegInit( Fixed(0, bitWidth, fracWidth) )
   op1 := MuxCase( psign, Array( 
+        ( opCode === UInt(6) ) -> kin,
         ( opCode === UInt(8) ) -> op_bx,
-        ( opCode === UInt(13) ) -> io.delta,
-        ( opCode === UInt(15) ||
-          opCode === UInt(14) ||
-          opCode === UInt(7) ||
-          opCode === UInt(6) ||
-          opCode === UInt(9) ) -> Fixed(0, bitWidth, fracWidth),
+        ( opCode === UInt(2) ) -> delta,
+        ( opCode === UInt(9) ) -> Fixed(0, bitWidth, fracWidth),
         ( opCode === UInt(5) ) -> Fixed( toFixed(1.0, fracWidth), bitWidth, fracWidth )
                 ))
-
-
 
   // select operand 2
   val op2 = RegInit( Fixed(0, bitWidth, fracWidth) )
   op2 := MuxCase( RegNext( hreg ), Array(               
-        ( opCode === UInt(15) ||
-          opCode === UInt(14) ||
-          opCode === UInt(7) ||
-          opCode === UInt(6) ||
+        ( opCode === UInt(6) ||
           opCode === UInt(9) ) -> Fixed(0, bitWidth, fracWidth),
         ( opCode === UInt(8) ) -> Fixed(toFixed(1.0, fracWidth), bitWidth, fracWidth)  
                 ))
@@ -271,46 +276,34 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
     out
   }
 
-  // 2. Pipelined DSP multiply
-  def dspMultiply( op1 : Fixed, op2 : Fixed, regIn : Int, regOut : Int): Fixed = {
-    val a = ShiftRegister( op1.toSInt, regIn )
-    val b = ShiftRegister( op2.toSInt, regIn )
-    val out = ShiftRegister( a * b, aStages - regIn ).toUInt
-    convToFixed( out )
+  def subtractStage( op1 : Fixed, op2 : Fixed ): Fixed = {
+    val a = RegNext( op1 )
+    val b = RegNext( op2 )
+    val out = ShiftRegister( (a - b), aStages - 1 )
+    out
   }
 
-  def convToFixed( a : UInt ) : Fixed = {
-    val b = (a>>fracWidth)
-    val fixedType = Fixed(width=bitWidth, fracWidth=fracWidth)
-    fixedType.fromBits( (0 until bitWidth).reverse.map( x => b(x) ).reduce(_##_) )
-  }
+  val mul = Module( new MulMod( bitWidth, fracWidth, 1) )
+  mul.io.op1 := op1
+  mul.io.op2 := op2
 
   val alu_out = Fixed(width=bitWidth, fracWidth=fracWidth)
   alu_out := MuxCase( Fixed(0, bitWidth, fracWidth), Array(
         ( aluCode === UInt(0) || 
-          aluCode === UInt(1) ||
-          aluCode === UInt(12 )) -> adderStage( op1, op2 ),
+          aluCode === UInt(12)) -> adderStage( op1, op2 ),
+        ( aluCode === UInt(4) ) -> subtractStage( op1, op2 ),
         ( aluCode === UInt(2) || 
-          aluCode === UInt(3) ||
-          aluCode === UInt(4) ||
-          aluCode === UInt(13) ||
-          aluCode === UInt(8) || 
-          aluCode === UInt(5) ) -> dspMultiply( op1, op2, 1, 2 )  
+          aluCode === UInt(5) ) -> RegNext( mul.io.res )  
                     ))
-
   dat_out := alu_out
-
-  val sumCode = RegNext( aluCode )
-  val dat_out_reg = Reg( init=Fixed(0, bitWidth, fracWidth), next=dat_out ) //reduce critical path
-  val sel_sl = Bool()
-  sel_sl := RegNext( (sumCode === UInt(4)) )
-  sum_local := Mux( sel_sl, (sum_local + dat_out_reg), Fixed(0, bitWidth, fracWidth) )
+  
 
   io.xout := x_parr
   io.hout := dat_out
-  io.sout := sum_local
+  io.ctrlOut := RegNext( io.ctrl )
   
 }
+
 
 
 class SignGen( val id : Int, k : Int, b : Int ) extends Module{
@@ -335,8 +328,7 @@ class SignGen( val id : Int, k : Int, b : Int ) extends Module{
     ( k%2 == 0)
   }
 
-  //val a = ( 0 until b ).map( x => (0 until 2 ).reverse.map( y => parity( x & ( pow(2,y).toInt ) ) ) )
-  val a = ( 0 until b ).map( x => (0 until log2Up(b) ).reverse.map( y => parity( x & ( pow(2,y).toInt ) ) ) )
+  val a = ( 0 until b ).map( x => (0 until 2 ).reverse.map( y => parity( x & ( pow(2,y).toInt ) ) ) )
 
   val s0 = a( id ).map( x => RegInit( Bool( x ) ) )
   val s1 = !xorR( hcg ) // xor-reduce
@@ -390,12 +382,6 @@ class AddrGen( k : Int, bitWidth : Int, fracWidth : Int ) extends Module{
     toggle := !toggle
   }
 
-  /*                                                   Addresses with Data                 Init BRAM
-  * k=256, 11-bits, cosine in    110 XXXXXXXX,   (000, 001, 010, 011, 100, 101)       H1 H2 G S a 0     (256)  cos (256) in 110
-  * k=128, 10-bits, cosine in    11X XXXXXXX,     all except (110) and (111)          H1 H2 G S a 0     (128)  cos (256) in 11
-  * k=64,  10-bits, cosine in  1 0XX XXXXXX,              all                         H1 H2 G S a 0 E   (64)   cos (256) in 10 
-  * k=32,  10-bits, cosine in 01 XXX XXXXX,               all                         H1 H2 G S a 0 E E (32)   cos (256) in 01
-  */
      // Cosine table parameters
   val intWidth = (bitWidth - fracWidth)
   val lutWidth = log2Up( 256 ) // 2**(lutWidth) = lutSize entries
@@ -407,31 +393,6 @@ class AddrGen( k : Int, bitWidth : Int, fracWidth : Int ) extends Module{
   var rDefault = UInt(0,2) ## io.func(2,0) ## io.counter
   var rHad = UInt(0,2) ## UInt(0,1) ## toggle ## hadGen
 
-  if( k==64 ){
-    rCos = UInt(2,2) ## cosAddr
-    rDefault = UInt(0,1) ## io.func(2,0) ## io.counter
-    rHad = UInt(0,1) ## UInt(0,1) ## toggle ## hadGen
-  }
-
-  if( k==128 ){
-    rCos = UInt(3,2) ## cosAddr
-    rDefault = (io.func(2,0) ## io.counter)
-    rHad = UInt(0,1) ## toggle ## hadGen
-  }
-
-  if( k==256 ){
-    rCos = UInt(6,3) ## cosAddr
-    rDefault = (io.func(2,0) ## io.counter)
-    rHad = UInt(0,1) ## toggle ## hadGen
-  }
-
-
-  /*
-  val rCos = (io.func(2,0) ## io.counter)
-  val rDefault = (io.func(2,0) ## io.counter)
-  val rHad = (UInt(0, 2) ## toggle ## hadGen)
-  val rSel = ( io.func === UInt(1, 4) ) 
-  */
   val rdAddr = UInt(width=11)
   rdAddr := MuxCase( rDefault, Array(
                     ( io.func === UInt(1, 4) ) -> rHad,
@@ -453,8 +414,6 @@ class AddrGen( k : Int, bitWidth : Int, fracWidth : Int ) extends Module{
                 ( wSel2 ) -> ( UInt(0,2) ## UInt(0, 3) ## wHadGen ),
                 ( wSel3 ) -> ( UInt(0,2) ## UInt(5, 3) ## wHadGen ) 
                     ))
-
-  // delay = (from func -> dat_out) = mStages + aStages + eStages
 
   // connect outputs
   io.rdAddr := rdAddr

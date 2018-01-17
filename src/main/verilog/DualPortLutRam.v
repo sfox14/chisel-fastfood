@@ -1,8 +1,8 @@
-// the dual-port BRAM Verilog below is adapted from Dan Strother's example:
+// the dual-port LRAM Verilog below is adapted from Dan Strother's example:
 // http://danstrother.com/2010/09/11/inferring-rams-in-fpgas/
-// incl: doA and doB pipeline registers
+// Removes a_wr: XST can not implement true dual port RAM in Distributed RAM
 
-module DualPortBRAM #(
+module DualPortLutRAM #(
     parameter DATA = 72,
     parameter ADDR = 10,
     parameter FNAME = "pe_0.mem"
@@ -20,8 +20,7 @@ module DualPortBRAM #(
     output  reg     [DATA-1:0]  b_dout
 );
 // Shared memory
-reg [DATA-1:0] mem [(2**ADDR)-1:0];
-reg [DATA-1:0] doA, doB; // output regusters
+(* ram_style="distributed" *) reg [DATA-1:0] mem [(2**ADDR)-1:0];
 
 //initial
 //begin
@@ -30,17 +29,15 @@ reg [DATA-1:0] doA, doB; // output regusters
 
 // Port A
 always @(posedge clk) begin
-    doA     <= mem[a_addr];
-    a_dout  <= doA;  
-    if(a_wr) begin
-        a_dout      <= a_din;
-        mem[a_addr] <= a_din;
-    end
+    a_dout      <= mem[a_addr];
+    //if(a_wr) begin
+    //    a_dout      <= a_din;
+    //    mem[a_addr] <= a_din;
+    //end
 end
 // Port B
 always @(posedge clk) begin
-    doB     <= mem[b_addr];
-    b_dout  <= doB;
+    //b_dout      <= mem[b_addr];
     if(b_wr) begin
         b_dout      <= b_din;
         mem[b_addr] <= b_din;

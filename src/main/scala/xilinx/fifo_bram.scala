@@ -1,6 +1,8 @@
 package xilinx
 
 import Chisel._
+import utils._
+import scala.util.Random
 
 /*
 Chisel Wrapper + Blackbox for FIFO IP generator core (uses BRAM) for 18-bit input
@@ -93,6 +95,25 @@ class top extends Module{
 
 }
 
+class fifoSim( c : top ) extends Tester( c ){
+
+	val rng = new Random(23)
+
+	reset(10)
+	poke( c.io.x.valid, true )
+	poke( c.io.y.ready, true )
+
+	for( ix <- 0 until 10 ){
+		var inData = rng.nextFloat
+		poke( c.io.x.bits, toFixed(inData, 9) )
+		peek( c.io.y.valid )
+		var outData = fromPeek.toDbl( peek( c.io.y.bits ), 18, 9 )
+		println( s"xin: 	$inData" )
+		println( s"yout: 	$outData")
+		step(1)
+	}
+}
+
 object fifoVerilog{
 
 	def main(args: Array[String]): Unit = {
@@ -101,4 +122,18 @@ object fifoVerilog{
 		() => Module( new top ) )
 	}
 
+}
+
+object fifoTester{
+
+
+  def main(args: Array[String]): Unit = {
+    println("Testing the fifo block")
+    
+    chiselMainTest(Array("--genHarness", "--test", "--backend", "c",
+      "--compile", "--targetDir", ".emulator", "--vcd" ), 
+      () => Module(new top ) ) {
+        f => new fifoSim( f )
+      }
+  }
 }

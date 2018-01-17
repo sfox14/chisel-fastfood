@@ -110,6 +110,66 @@ class DualPortBRAM[T <: Fixed](gen : T, addrBits: Int, id : Int,
   }
 }
 
+// For higher fmax
+class PipelinedDualPortLutRAM[T <: Fixed](gen : T, addrBits: Int,
+  regIn: Int,    // number of registers at input
+  regOut: Int,   // number of registers at output
+  id : Int, init : Seq[BigInt], forSim : Boolean = true
+) extends Module {
+
+
+  val io = new DualPortBRAMIO(gen, addrBits)
+  // instantiate the desired BRAM
+  val bram = Module(new DualPortLutRAM(gen, addrBits, id, init, forSim)).io
+
+  bram.ports(0).req := ShiftRegister(io.ports(0).req, regIn)
+  bram.ports(1).req := ShiftRegister(io.ports(1).req, regIn)
+
+  io.ports(0).rsp := ShiftRegister(bram.ports(0).rsp, regOut)
+  io.ports(1).rsp := ShiftRegister(bram.ports(1).rsp, regOut)
+}
+
+class DualPortLutRAM[T <: Fixed](gen : T, addrBits: Int, id : Int,  
+    init : Seq[BigInt], forSim : Boolean = true ) extends BlackBox {
+  val io = new DualPortBRAMIO(gen, addrBits)
+  setVerilogParameters(new VerilogParameters {
+    val DATA = gen.getWidth
+    val ADDR = addrBits
+    val FNAME = s"pe_$id.data"
+  })
+
+  // the clock does not get added to the BlackBox interface by default
+  addClock( Driver.implicitClock )
+
+  // simulation model for TDP Lut RAM
+  println( log2Up( init.length ), addrBits )
+
+  //Write init data to a file
+  //if( !forSim ){
+  //  toFile(id, init, gen.getWidth)
+  //}
+
+  // Chisel Mem does not accept an initialisation. Instead use Vec(RegInit) but only 
+  // for simulation, otherwise the verilog instantiation will have a reset.
+  if( forSim ){
+    val fixedType = gen.cloneType 
+    val ram = Vec( init.map((i : BigInt) => Fixed(i, fixedType.getWidth, 
+                                  fixedType.fractionalWidth) ) )
+    val mem = RegInit( ram )
+
+    for (i <- 0 until 2) {
+      val req = io.ports(i).req
+      val regAddr = Reg(next = io.ports(i).req.addr)
+
+      io.ports(i).rsp.readData := mem(regAddr)
+
+      when (req.writeEn) {
+        mem(req.addr) := req.writeData
+      }
+    }
+  }
+}
+
 /*
 Save contents of BRAM to file, and ensure the formatting supports XST 
 */

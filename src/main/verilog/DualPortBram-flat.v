@@ -1,6 +1,5 @@
 // the dual-port BRAM Verilog below is adapted from Dan Strother's example:
 // http://danstrother.com/2010/09/11/inferring-rams-in-fpgas/
-// incl: doA and doB pipeline registers
 
 module DualPortBRAM #(
     parameter DATA = 72,
@@ -21,17 +20,15 @@ module DualPortBRAM #(
 );
 // Shared memory
 reg [DATA-1:0] mem [(2**ADDR)-1:0];
-reg [DATA-1:0] doA, doB; // output regusters
 
-//initial
-//begin
-//    $readmemh(FNAME, mem);
-//end
+initial
+begin
+    $readmemh(FNAME, mem);
+end
 
 // Port A
 always @(posedge clk) begin
-    doA     <= mem[a_addr];
-    a_dout  <= doA;  
+    a_dout      <= mem[a_addr];
     if(a_wr) begin
         a_dout      <= a_din;
         mem[a_addr] <= a_din;
@@ -39,8 +36,7 @@ always @(posedge clk) begin
 end
 // Port B
 always @(posedge clk) begin
-    doB     <= mem[b_addr];
-    b_dout  <= doB;
+    b_dout      <= mem[b_addr];
     if(b_wr) begin
         b_dout      <= b_din;
         mem[b_addr] <= b_din;

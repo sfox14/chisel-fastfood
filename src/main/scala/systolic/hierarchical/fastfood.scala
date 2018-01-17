@@ -85,6 +85,7 @@ class Fastfood( val bitWidth : Int, val fracWidth : Int,
 
   val fsm = Module( new FSM( bitWidth, fracWidth, n, p, d, aStages ) )
 
+  /*
   val fifoDepth = d*5000
   val readyToStart = Bool()
   val inFifo = Module( new Queue( Vec.fill(2){ Fixed( width=bitWidth, fracWidth=fracWidth ) }, fifoDepth ) ) 
@@ -97,10 +98,11 @@ class Fastfood( val bitWidth : Int, val fracWidth : Int,
   inFifo.io.enq.bits := RegNext( RegNext( io.inData.bits ) )
   inFifo.io.enq.valid := RegNext( RegNext( io.inData.valid ) )
   inFifo.io.deq.ready := ( readyToStart && fsm.io.xrdy )
-  
+  */
   
   val inputX = Fixed(width=bitWidth, fracWidth=fracWidth)
   val inputY = Fixed(width=bitWidth, fracWidth=fracWidth)
+  /*
   // FSM inputs
   if( forSim ){
     fsm.io.vld := readyToStart
@@ -111,7 +113,11 @@ class Fastfood( val bitWidth : Int, val fracWidth : Int,
     inputX := RegNext( RegNext( io.inData.bits(0) ) )
     inputY := RegNext( RegNext( io.inData.bits(1) ) )
   }
-  
+  */
+  fsm.io.vld := Bool(true)
+  inputX := RegNext( RegNext( io.inData.bits(0) ) )
+  inputY := RegNext( RegNext( io.inData.bits(1) ) )
+
   // connect array   
   array(0).io.xin := inputX
   array(0).io.yin := inputY
@@ -132,12 +138,15 @@ class Fastfood( val bitWidth : Int, val fracWidth : Int,
   for( ix <- 1 until h ){
     array( ix ).io.ctrl := array( ix-1 ).io.ctrlOut 
   }
-
+  /*
   if( forSim ){
     io.inData.ready := inFifo.io.enq.ready
   } else{
     io.inData.ready := Bool(true)
-  }
+  }*/
+
+  io.inData.ready := Bool(true)
+
   io.outData.bits := array(0).io.sout
   io.outData.valid := fsm.io.yrdy
 

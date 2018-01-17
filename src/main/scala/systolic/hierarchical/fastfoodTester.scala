@@ -183,16 +183,60 @@ object fastfoodTester{
 }
 
 
-object fastfoodVerilog{
+object fastfoodVerilog {
+
+  val bitWidth = 18
+  val fracWidth = 9
+  
+
+  def main(args: Array[String]): Unit = {
+    
+    val sigma = 11.47
+    val n = args(0).toInt //2048
+    val p = args(1).toInt //256
+    val d = args(2).toInt //2048
+    val eta = 0.5
+
+    // alu stages
+    val aStages = 3
+
+    // get n-length parameter vectors
+    val (gvec, svec, avec) = helper.fit( n, d, sigma )
+
+    // convert to fixed point, and group to PEs
+    val g = gvec.map(x => toFixed(x, fracWidth) ).grouped( d ).toVector.map( x => x.grouped( n/p ).toVector )
+    val s = svec.map(x => toFixed(x, fracWidth) ).grouped( d ).toVector.map( x => x.grouped( n/p ).toVector )
+    val alpha = avec.map(x => toFixed(x, fracWidth) ).grouped( d ).toVector.map( x => x.grouped( n/p ).toVector )
+
+    val k = n/p
+    val h = n/d
+    val b = p/h
+
+    println(s"Dictionary Size: $n")
+    println(s"Number of PEs: $p")
+    println(s"Number of Features: $d")
+    println(s"Data per PE: $k")
+    println(s"Number of Hadamard Blocks: $h")
+    println(s"PEs per Hadamard: $b")
+
+    println(s"Generating verilog for the $n/$d/$p array of PEs")
+    chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
+                () => Module( new Fastfood( bitWidth, fracWidth, n, p, d, g, s, 
+                        alpha, aStages, false, 0.5 ) ) )
+  }
+
+
+}
+
+object ffPeVerilog{
 
   val bitWidth = 18
   val fracWidth = 9
   
   val sigma = 11.47
-  val n = 49152 
-  val p = 384
-  val d = 4096 
-  val eta = 0.5
+  val n = 8096
+  val p = 256
+  val d = 1024
 
   // alu stages
   val aStages = 3
@@ -206,8 +250,8 @@ object fastfoodVerilog{
   val alpha = avec.map(x => toFixed(x, fracWidth) ).grouped( d ).toVector.map( x => x.grouped( n/p ).toVector )
 
   val k = n/p
-  val h = n/d
-  val b = p/h
+  val h = n/d 
+  val b = p/h // 2
 
   println(s"Dictionary Size: $n")
   println(s"Number of PEs: $p")
@@ -218,11 +262,10 @@ object fastfoodVerilog{
 
 
   def main(args: Array[String]): Unit = {
-    println(s"Generating verilog for the $n/$d/$p array of PEs")
+    println(s"Generating verilog for one Fastfood PE")
     chiselMain(Array("--backend", "v", "--targetDir", "verilog"), 
-                () => Module( new Fastfood( bitWidth, fracWidth, n, p, d, g, s, 
-                        alpha, aStages, false, 0.5 ) ) )
+                () => Module( new PE(0, 0, bitWidth, fracWidth,
+                n, p, d, g(0)(0), s(0)(0), alpha(0)(0), aStages, false ) ) )
   }
-
 
 }
