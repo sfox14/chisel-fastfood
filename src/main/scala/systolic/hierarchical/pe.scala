@@ -84,6 +84,7 @@ class PE( val id : Int, val hid : Int, val bitWidth : Int, val fracWidth : Int,
     val sout = Fixed(OUTPUT, bitWidth, fracWidth)
 
     val ctrl = new CtrlPE().flip()
+  }
 
   /*
   k = n/p  // Dictionary per PE

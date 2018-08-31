@@ -12,9 +12,9 @@ source_files := $(wildcard $(srcdir)/*.scala)
 top_name ?= Fastfood
 top_src ?= ./verilog/Fastfood.v
 compile_src = ./src/main/tcl/compile.tcl
-N ?= 2048
-D ?= 2048
-P ?= 256
+N ?= 4096
+D ?= 512 
+P ?= 128
 config ?= $(N):$(D):$(P):$(E)
 device ?= KU035
 # E - controls compile script. E=0 Fastfood. E=1 DummyArray pblock. E=2 DummyArray floorplan
@@ -64,7 +64,7 @@ explore:
 	$(MAKE) impl N=8192 D=4096  P=512
 	$(MAKE) impl N=16384 D=4096 P=512
 	$(MAKE) impl N=32768 D=4096 P=512
-	(MAKE) impl N=65536 D=4096 P=512
+	$(MAKE) impl N=65536 D=4096 P=512
 
 # Explore different DummyArray designs
 explore-ex1:
