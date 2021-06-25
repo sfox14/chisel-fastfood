@@ -1,6 +1,6 @@
 # Chisel Fastfood
 
-This repository contains Chisel HDL code for the paper titled `FPGA Fastfood: A High Speed Systolic Implementation of a Large Scale Online Kernel Method` given [here](http://phwl.org/papers/ff_fpga18.pdf).
+This repository contains Chisel HDL code for the paper titled [FPGA Fastfood: A High Speed Systolic Implementation of a Large Scale Online Kernel Method](http://phwl.org/papers/ff_fpga18.pdf).
 
 ## Quick Start
 To generate the verilog, run:
